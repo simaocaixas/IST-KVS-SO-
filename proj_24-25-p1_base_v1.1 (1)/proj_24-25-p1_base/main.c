@@ -11,8 +11,9 @@
 #include "parser.h"
 #include "operations.h"
 
+
 int parse_file(int fd_in,int fd_out) {
- 
+
   while (1) {
     char keys[MAX_WRITE_SIZE][MAX_STRING_SIZE] = {0};
     char values[MAX_WRITE_SIZE][MAX_STRING_SIZE] = {0};
@@ -64,7 +65,7 @@ int parse_file(int fd_in,int fd_out) {
 
       case CMD_SHOW:
 
-        kvs_show();
+        kvs_show(fd_out);
         break;
 
       case CMD_WAIT:
@@ -116,8 +117,6 @@ int parse_file(int fd_in,int fd_out) {
   return 1;
 }
 
-
-
 int generate_paths(char *dir_name, struct dirent *entry, char *in_path, char *out_path) {
   char *file_name = entry->d_name;
 
@@ -150,7 +149,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "Usage: %s <directory>\n", argv[0]);
     return 1;
   }
-  
+
   if (kvs_init()) {
     fprintf(stderr, "Failed to initialize KVS\n");
     return 1;
@@ -161,22 +160,29 @@ int main(int argc, char** argv) {
 
   char in_path[MAX_JOB_FILE_NAME_SIZE], out_path[MAX_JOB_FILE_NAME_SIZE];
   DIR *dir = opendir(dir_name);
-  
+
   if (!dir) {
     perror("Failed to open directory");
     kvs_terminate(); // Terminate KVS gracefully if it's already initialized
     return 1;
   }
-
-
   struct dirent *entry; 
 
   while ((entry = readdir(dir)) != NULL) {
     if (generate_paths(dir_name,entry,in_path,out_path)) {
-        int fd_in = open(in_path, O_RDONLY);
-        int fd_out = open(out_path, O_WRONLY);
+        int fd_in = open(in_path, O_RDONLY);      
+        int fd_out = open(out_path, O_WRONLY | O_CREAT, 00700);
+
         parse_file(fd_in,fd_out);
+        
+        if (close(fd_in) < 0) {
+          fprintf(stderr, "Failed to close in file...\n");
+        }
+
+        if (close(fd_out) < 0) {
+          fprintf(stderr, "Failed to close out file...\n");
+        }
     } 
   }
-  //printf("%s %s", in_path,out_path);   TESTE TESTE TESTE TESTE TESTE TESTE TESTE 
+  //printf("%s %s", in_path,out_path);   
 }
