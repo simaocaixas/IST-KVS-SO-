@@ -20,7 +20,6 @@ int parse_file(int fd_in,int fd_out) {
     unsigned int delay;
     size_t num_pairs;
 
-    printf("> ");
     fflush(stdout);
 
     switch (get_next(fd_in)) {
@@ -45,7 +44,7 @@ int parse_file(int fd_in,int fd_out) {
           continue;
         }
 
-        if (kvs_read(num_pairs, keys)) {
+        if (kvs_read(num_pairs, keys, fd_out)) {
           fprintf(stderr, "Failed to read pair\n");
         }
         break;
@@ -75,7 +74,14 @@ int parse_file(int fd_in,int fd_out) {
         }
 
         if (delay > 0) {
-          printf("Waiting...\n");
+
+          char line[] = "Waiting...\n";
+          long unsigned int lineSize = strlen(line);
+
+          if (write(fd_out,line,lineSize) != (int)lineSize) { 
+            fprintf(stderr, "Was not able to wait!\n");
+          } 
+        
           kvs_wait(delay);
         }
         break;

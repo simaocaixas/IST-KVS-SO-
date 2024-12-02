@@ -1,4 +1,5 @@
+WAIT 2
 WRITE [(c1,v1)(chave2,valor-exemplo)]
 SHOW
-
+READ [c1,chave2]
 

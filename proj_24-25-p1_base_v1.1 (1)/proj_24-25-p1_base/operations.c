@@ -52,25 +52,43 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE], char values[][MAX_
   return 0;
 }
 
-int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE]) {
+int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
   if (kvs_table == NULL) {
     fprintf(stderr, "KVS state must be initialized\n");
     return 1;
   }
 
-  printf("[");
+  if ((write(fd,"[",1)) != 1) {
+    fprintf(stderr, "Could not write\n");
+    return 0;
+  }
+
   for (size_t i = 0; i < num_pairs; i++) {
     char* result = read_pair(kvs_table, keys[i]);
+    char line[MAX_STRING_SIZE];
+
     if (result == NULL) {
-      printf("(%s,KVSERROR)", keys[i]);
+        snprintf(line, MAX_STRING_SIZE, "(%s,KVSERROR)", keys[i]); 
     } else {
-      printf("(%s,%s)", keys[i], result);
+        snprintf(line, MAX_STRING_SIZE, "(%s,%s)", keys[i], result);
     }
+    
+    if (write(fd, line, strlen(line)) < 1) {
+        fprintf(stderr, "Could not write key-value\n");
+        free(result);
+        return 1; // Saia imediatamente se ocorrer falha no write
+    }
+    
     free(result);
-  }
-  printf("]\n");
+}
+if ((write(fd,"]\n",2)) != 2) {
+  fprintf(stderr, "Could not write\n");
   return 0;
 }
+
+return 0;
+}
+
 
 int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE]) {
   if (kvs_table == NULL) {
