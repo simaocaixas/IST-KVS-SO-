@@ -5,20 +5,34 @@
 #include <dirent.h>
 #include <string.h>
 #include <fcntl.h>
+#include <sys/wait.h> 
+
 
 
 #include "constants.h"
 #include "parser.h"
 #include "operations.h"
 
+int max_backups;
+int backup_counter = 0; 
 
-int parse_file(int fd_in,int fd_out) {
+int parse_file(int fd_in,int fd_out,char* dir_name,char* file_name,int total_backups) {
 
   while (1) {
     char keys[MAX_WRITE_SIZE][MAX_STRING_SIZE] = {0};
     char values[MAX_WRITE_SIZE][MAX_STRING_SIZE] = {0};
     unsigned int delay;
     size_t num_pairs;
+
+    const char *help_string = 
+      "Available commands:\n"
+      "  WRITE [(key,value),(key2,value2),...]\n"
+      "  READ [key,key2,...]\n"
+      "  DELETE [key,key2,...]\n"
+      "  SHOW\n"
+      "  WAIT <delay_ms>\n"
+      "  BACKUP\n" // Not implemented
+      "  HELP\n";
 
     fflush(stdout);
 
@@ -57,7 +71,7 @@ int parse_file(int fd_in,int fd_out) {
           continue;
         }
 
-        if (kvs_delete(num_pairs, keys)) {
+        if (kvs_delete(num_pairs, keys, fd_out)) {
           fprintf(stderr, "Failed to delete pair\n");
         }
         break;
@@ -75,42 +89,69 @@ int parse_file(int fd_in,int fd_out) {
 
         if (delay > 0) {
 
-          char line[] = "Waiting...\n";
-          long unsigned int lineSize = strlen(line);
+        char line[] = "Waiting...\n";
+        size_t lineSize = strlen(line);
+        size_t total_written = 0;
 
-          if (write(fd_out,line,lineSize) != (int)lineSize) { 
-            fprintf(stderr, "Was not able to wait!\n");
-          } 
+        while (total_written < lineSize) {
+            ssize_t written = write(fd_out, line + total_written, lineSize - total_written);
+            if (written < 0) {
+                fprintf(stderr, "Was not able to wait!\n");
+                break;
+            }
+            total_written += (size_t)written;
+        }
+
+        kvs_wait(delay);
+        }
+        break;
+
+case CMD_BACKUP: {
+    if (backup_counter >= max_backups) {
+        int status;
+        pid_t finished_pid = wait(&status); 
+        if (finished_pid > 0) {
+            if (WIFEXITED(status) != 1) {
+                fprintf(stderr, "Backup process %d terminated abnormally.\n", finished_pid);
+                return 0;
+            } 
+          backup_counter--;
+        }
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        fprintf(stderr, "Failed to fork.\n");
+        return 0;
+    } else if (pid == 0) {
         
-          kvs_wait(delay);
+        if (kvs_backup(dir_name,file_name,total_backups + 1)) {
+            fprintf(stderr, "Failed to perform backup.\n");
+            exit(1); 
         }
-        break;
+        exit(0); 
+    } else {
+        total_backups++;
+        backup_counter++; 
+    }
+    printf("%d", backup_counter);
+    break;
+}
 
-      case CMD_BACKUP:
-
-        if (kvs_backup()) {
-          fprintf(stderr, "Failed to perform backup.\n");
-        }
-        break;
 
       case CMD_INVALID:
         fprintf(stderr, "Invalid command. See HELP for usage\n");
         break;
 
-      case CMD_HELP:
-        printf( 
-            "Available commands:\n"
-            "  WRITE [(key,value),(key2,value2),...]\n"
-            "  READ [key,key2,...]\n"
-            "  DELETE [key,key2,...]\n"
-            "  SHOW\n"
-            "  WAIT <delay_ms>\n"
-            "  BACKUP\n" // Not implemented
-            "  HELP\n"
-        );
+      case CMD_HELP: 
 
-        break;
-        
+          if (write(fd_out, help_string, strlen(help_string)) < 1) {
+              fprintf(stderr, "Failed to write to output. See HELP for usage\n");
+              break;
+          }
+
+          break;
+          
       case CMD_EMPTY:
         break;
 
@@ -151,10 +192,12 @@ int generate_paths(char *dir_name, struct dirent *entry, char *in_path, char *ou
 
 int main(int argc, char** argv) {
 
-  if (argc < 2) {
-    fprintf(stderr, "Usage: %s <directory>\n", argv[0]);
-    return 1;
+  if (argc < 3) {
+      fprintf(stderr, "Usage: %s <arg1> <max_backups>\n", argv[0]);
+      return 1;
   }
+
+  max_backups = atoi(argv[2]); 
 
   if (kvs_init()) {
     fprintf(stderr, "Failed to initialize KVS\n");
@@ -179,7 +222,8 @@ int main(int argc, char** argv) {
         int fd_in = open(in_path, O_RDONLY);      
         int fd_out = open(out_path, O_WRONLY | O_CREAT, 00700);
 
-        parse_file(fd_in,fd_out);
+        int total_backups = 0;
+        parse_file(fd_in,fd_out,dir_name,entry->d_name, total_backups);
         
         if (close(fd_in) < 0) {
           fprintf(stderr, "Failed to close in file...\n");
