@@ -106,39 +106,36 @@ int parse_file(int fd_in,int fd_out,char* dir_name,char* file_name,int total_bac
         }
         break;
 
-case CMD_BACKUP: {
-    if (backup_counter >= max_backups) {
-        int status;
-        pid_t finished_pid = wait(&status); 
-        if (finished_pid > 0) {
-            if (WIFEXITED(status) != 1) {
-                fprintf(stderr, "Backup process %d terminated abnormally.\n", finished_pid);
-                return 0;
-            } 
-          backup_counter--;
-        }
-    }
+      case CMD_BACKUP: {
+          if (backup_counter >= max_backups) {
+              int status;
+              pid_t finished_pid = wait(&status); 
+              if (finished_pid > 0) {
+                  if (WIFEXITED(status) != 1) {
+                      fprintf(stderr, "Backup process %d terminated abnormally.\n", finished_pid);
+                      return 0;
+                  } 
+                backup_counter--;
+              }
+          }
 
-    pid_t pid = fork();
-    if (pid < 0) {
-        fprintf(stderr, "Failed to fork.\n");
-        return 0;
-    } else if (pid == 0) {
-        
-        if (kvs_backup(dir_name,file_name,total_backups + 1)) {
-            fprintf(stderr, "Failed to perform backup.\n");
-            exit(1); 
-        }
-        exit(0); 
-    } else {
-        total_backups++;
-        backup_counter++; 
-    }
-    printf("%d", backup_counter);
-    break;
-}
-
-
+          pid_t pid = fork();
+          if (pid < 0) {
+              fprintf(stderr, "Failed to fork.\n");
+              return 0;
+          } else if (pid == 0) {
+              
+              if (kvs_backup(dir_name,file_name,total_backups + 1)) {
+                  fprintf(stderr, "Failed to perform backup.\n");
+                  exit(1); 
+              }
+              exit(0); 
+          } else {
+              total_backups++;
+              backup_counter++; 
+          }
+          break;
+      }
       case CMD_INVALID:
         fprintf(stderr, "Invalid command. See HELP for usage\n");
         break;
@@ -156,7 +153,6 @@ case CMD_BACKUP: {
         break;
 
       case EOC:
-        kvs_terminate();
         return 0;
     }
   }
@@ -197,42 +193,37 @@ int main(int argc, char** argv) {
       return 1;
   }
 
-  max_backups = atoi(argv[2]); 
-
   if (kvs_init()) {
     fprintf(stderr, "Failed to initialize KVS\n");
     return 1;
   }
 
+  max_backups = atoi(argv[2]); 
   char *dir_name = argv[1];
-  fprintf(stdin,"%s", dir_name);
-
   char in_path[MAX_JOB_FILE_NAME_SIZE], out_path[MAX_JOB_FILE_NAME_SIZE];
   DIR *dir = opendir(dir_name);
 
+
   if (!dir) {
     perror("Failed to open directory");
-    kvs_terminate(); // Terminate KVS gracefully if it's already initialized
     return 1;
   }
+
   struct dirent *entry; 
 
   while ((entry = readdir(dir)) != NULL) {
-    if (generate_paths(dir_name,entry,in_path,out_path)) {
+    if (generate_paths(dir_name,entry,in_path,out_path)) {    
         int fd_in = open(in_path, O_RDONLY);      
         int fd_out = open(out_path, O_WRONLY | O_CREAT, 00700);
-
         int total_backups = 0;
         parse_file(fd_in,fd_out,dir_name,entry->d_name, total_backups);
-        
-        if (close(fd_in) < 0) {
+        if (close(fd_in) || close(fd_out) < 0) {
           fprintf(stderr, "Failed to close in file...\n");
-        }
-
-        if (close(fd_out) < 0) {
-          fprintf(stderr, "Failed to close out file...\n");
-        }
-    } 
+        }      
+    }
   }
+
+  kvs_terminate();
+  closedir(dir);
   //printf("%s %s", in_path,out_path);   
 }
