@@ -214,6 +214,11 @@ int main(int argc, char** argv) {
   struct dirent *entry;
   int total_threads = 0;
 
+  if (total_threads == 11) {
+    printf("JUSTO COMPILE");
+    return 1;
+  }
+
   while ((entry = readdir(dir)) != NULL) {
     // if(total_threads <)
       if (generate_paths(dir_name,entry,in_path,out_path)) {    

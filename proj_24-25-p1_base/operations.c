@@ -12,6 +12,7 @@
 
 static struct HashTable* kvs_table = NULL;
 
+
 /// writes str into file descriptor
 /// @param str string to write 
 /// @param fd file descriptor 
@@ -73,11 +74,18 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE], char values[][MAX_
   return 0;
 }
 
+int compare_keys(const void *a, const void *b) {
+  return strcmp((const char *)a, (const char *)b);
+}
+
+
 int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
   if (kvs_table == NULL) {
     fprintf(stderr, "KVS state must be initialized\n");
     return 1;
   }
+
+  qsort(keys, num_pairs, MAX_STRING_SIZE, compare_keys);
 
   // Escreve o '[' inicial
   if (write_to_fd(fd, "[") != 0) {
