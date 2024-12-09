@@ -3,6 +3,7 @@
 
 #include <stdlib.h>
 #include <ctype.h>
+#include <pthread.h>
 
 // Hash function based on key initial.
 // @param key Lowercase alphabetical string.
@@ -24,6 +25,7 @@ struct HashTable* create_hash_table() {
   if (!ht) return NULL;
   for (int i = 0; i < TABLE_SIZE; i++) {
       ht->table[i] = NULL;
+      pthread_rwlock_init(&ht->hash_lock[i], NULL); //VERIFICAR
   }
   return ht;
 }
@@ -31,7 +33,7 @@ struct HashTable* create_hash_table() {
 int write_pair(HashTable *ht, const char *key, const char *value) {
     int index = hash(key);
     KeyNode *keyNode = ht->table[index];
-
+    
     // Search for the key node
     while (keyNode != NULL) {
         if (strcmp(keyNode->key, key) == 0) {
@@ -48,6 +50,8 @@ int write_pair(HashTable *ht, const char *key, const char *value) {
     keyNode->value = strdup(value); // Allocate memory for the value
     keyNode->next = ht->table[index]; // Link to existing nodes
     ht->table[index] = keyNode; // Place new key node at the start of the list
+
+
     return 0;
 }
 
@@ -98,6 +102,7 @@ int delete_pair(HashTable *ht, const char *key) {
 void free_table(HashTable *ht) {
     for (int i = 0; i < TABLE_SIZE; i++) {
         KeyNode *keyNode = ht->table[i];
+        pthread_rwlock_destroy(&ht->hash_lock[i]);
         while (keyNode != NULL) {
             KeyNode *temp = keyNode;
             keyNode = keyNode->next;

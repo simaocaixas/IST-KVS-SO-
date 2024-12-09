@@ -45,6 +45,7 @@ int kvs_init() {
   }
 
   kvs_table = create_hash_table();
+
   return kvs_table == NULL;
 }
 
@@ -67,11 +68,21 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE], char values[][MAX_
   }
 
   for (size_t i = 0; i < num_pairs; i++) {
+    int index = hash(keys[i]);
+    pthread_rwlock_wrlock(kvs_table->hash_lock[index]);
+  }  
+
+  for (size_t i = 0; i < num_pairs; i++) {
     if (write_pair(kvs_table, keys[i], values[i]) != 0) {
       fprintf(stderr, "Failed to write keypair (%s,%s)\n", keys[i], values[i]);
     }
   }
 
+  for (size_t i = 0; i < num_pairs; i++) {
+    int index = hash(keys[i]);
+    pthread_rwlock_unlock(kvs_table->hash_lock[index]);
+  } 
+  
   return 0;
 }
 
@@ -79,6 +90,11 @@ int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
   if (kvs_table == NULL) {
     fprintf(stderr, "KVS state must be initialized\n");
     return 1;
+  }
+
+  for (size_t i = 0; i < num_pairs; i++) {
+    int index = hash(keys[i]);
+    pthread_rwlock_rdlock(kvs_table->hash_lock[index]);
   }
 
   // Escreve o '[' inicial
@@ -103,6 +119,11 @@ int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
     }
 
     free(result);
+  }
+
+  for (size_t i = 0; i < num_pairs; i++) {
+    int index = hash(keys[i]);
+    pthread_rwlock_unlock(kvs_table->hash_lock[index]);
   }
 
   // Escreve o ']' final
