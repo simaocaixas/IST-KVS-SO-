@@ -128,7 +128,7 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE], char values[][MAX_
     }
   }
 
-  UNLOCK_HASH_LOOP(keys, num_pairs, kvs_table, hash);
+  UNLOCK_HASH_LOOP(sorted_keys, num_pairs, kvs_table, hash);
   
   return 0;
 }
@@ -182,8 +182,15 @@ int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
     fprintf(stderr, "KVS state must be initialized\n");
     return 1;
   }
+
+  char *sorted_keys[num_pairs];
+  for (size_t i = 0; i < num_pairs; i++) {
+      sorted_keys[i] = keys[i]; // Aponta para as chaves originais
+  }
+
+  qsort(sorted_keys, num_pairs, sizeof(char *), compare_keys);  //this needs to be BEFORE LOCK!
   
-  WRLOCK_HASH_LOOP(keys, num_pairs, kvs_table, hash);
+  WRLOCK_HASH_LOOP(sorted_keys, num_pairs, kvs_table, hash);
 
   int aux = 0;
   char line[MAX_STRING_SIZE];
@@ -217,7 +224,7 @@ int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
     }
   }
 
-  UNLOCK_HASH_LOOP(keys, num_pairs, kvs_table, hash);
+  UNLOCK_HASH_LOOP(sorted_keys, num_pairs, kvs_table, hash);
 
   return 0;
 }
