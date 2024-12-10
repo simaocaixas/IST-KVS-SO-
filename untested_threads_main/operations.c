@@ -5,6 +5,8 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <fcntl.h>
+#include <pthread.h>
+
 
 #include "kvs.h"
 #include "constants.h"
@@ -60,7 +62,6 @@ int kvs_terminate() {
 }
 
 
-// ORDENAR E COLOCAR TRINCOS
 int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE], char values[][MAX_STRING_SIZE]) {
   if (kvs_table == NULL) {
     fprintf(stderr, "KVS state must be initialized\n");
@@ -69,7 +70,7 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE], char values[][MAX_
 
   for (size_t i = 0; i < num_pairs; i++) {
     int index = hash(keys[i]);
-    pthread_rwlock_wrlock(kvs_table->hash_lock[index]);
+    pthread_rwlock_wrlock(&kvs_table->hash_lock[index]);
   }  
 
   for (size_t i = 0; i < num_pairs; i++) {
@@ -80,7 +81,7 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE], char values[][MAX_
 
   for (size_t i = 0; i < num_pairs; i++) {
     int index = hash(keys[i]);
-    pthread_rwlock_unlock(kvs_table->hash_lock[index]);
+    pthread_rwlock_unlock(&kvs_table->hash_lock[index]);
   } 
   
   return 0;
@@ -94,7 +95,7 @@ int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
 
   for (size_t i = 0; i < num_pairs; i++) {
     int index = hash(keys[i]);
-    pthread_rwlock_rdlock(kvs_table->hash_lock[index]);
+    pthread_rwlock_rdlock(&kvs_table->hash_lock[index]);
   }
 
   // Escreve o '[' inicial
@@ -123,7 +124,7 @@ int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
 
   for (size_t i = 0; i < num_pairs; i++) {
     int index = hash(keys[i]);
-    pthread_rwlock_unlock(kvs_table->hash_lock[index]);
+    pthread_rwlock_unlock(&kvs_table->hash_lock[index]);
   }
 
   // Escreve o ']' final
