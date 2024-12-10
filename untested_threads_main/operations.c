@@ -1,3 +1,5 @@
+
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,9 +9,46 @@
 #include <fcntl.h>
 #include <pthread.h>
 
-
 #include "kvs.h"
 #include "constants.h"
+
+#define WRLOCK_HASH_LOOP(keys, num_pairs, kvs_table, hash) \
+    for (size_t i = 0; i < (num_pairs); i++) { \
+        int index = (hash)((keys)[i]); \
+        if (pthread_rwlock_wrlock(&(kvs_table)->hash_lock[index]) != 0) { \
+            fprintf(stderr, "Failed to lock write!\n"); \
+        } \
+    }
+
+#define ALL_RDLOCK_HASH_LOOP(num_pairs, kvs_table) \
+    for (size_t i = 0; i < (num_pairs); i++) { \
+        if (pthread_rwlock_rdlock(&(kvs_table)->hash_lock[i]) != 0) { \
+            fprintf(stderr, "Failed to unlock lock!\n"); \
+        } \
+    }
+
+#define RDLOCK_HASH_LOOP(keys, num_pairs, kvs_table, hash) \
+    for (size_t i = 0; i < (num_pairs); i++) { \
+        int index = (hash)((keys)[i]); \
+        if (pthread_rwlock_rdlock(&(kvs_table)->hash_lock[index]) != 0) { \
+            fprintf(stderr, "Failed to lock read!\n"); \
+        } \
+    }
+
+#define UNLOCK_HASH_LOOP(keys, num_pairs, kvs_table, hash) \
+    for (size_t i = 0; i < (num_pairs); i++) { \
+        int index = (hash)((keys)[i]); \
+        if (pthread_rwlock_unlock(&(kvs_table)->hash_lock[index]) != 0) { \
+            fprintf(stderr, "Failed to unlock lock!\n"); \
+        } \
+    }
+    
+#define ALL_UNLOCK_HASH_LOOP(num_pairs, kvs_table) \
+    for (size_t i = 0; i < (num_pairs); i++) { \
+        if (pthread_rwlock_unlock(&(kvs_table)->hash_lock[i]) != 0) { \
+            fprintf(stderr, "Failed to unlock lock!\n"); \
+        } \
+    }
 
 
 static struct HashTable* kvs_table = NULL;
@@ -61,17 +100,13 @@ int kvs_terminate() {
   return 0;
 }
 
-
 int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE], char values[][MAX_STRING_SIZE]) {
   if (kvs_table == NULL) {
     fprintf(stderr, "KVS state must be initialized\n");
     return 1;
   }
-
-  for (size_t i = 0; i < num_pairs; i++) {
-    int index = hash(keys[i]);
-    pthread_rwlock_wrlock(&kvs_table->hash_lock[index]);
-  }  
+  
+  WRLOCK_HASH_LOOP(keys, num_pairs, kvs_table, hash);
 
   for (size_t i = 0; i < num_pairs; i++) {
     if (write_pair(kvs_table, keys[i], values[i]) != 0) {
@@ -79,10 +114,7 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE], char values[][MAX_
     }
   }
 
-  for (size_t i = 0; i < num_pairs; i++) {
-    int index = hash(keys[i]);
-    pthread_rwlock_unlock(&kvs_table->hash_lock[index]);
-  } 
+  UNLOCK_HASH_LOOP(keys, num_pairs, kvs_table, hash);
   
   return 0;
 }
@@ -93,10 +125,7 @@ int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
     return 1;
   }
 
-  for (size_t i = 0; i < num_pairs; i++) {
-    int index = hash(keys[i]);
-    pthread_rwlock_rdlock(&kvs_table->hash_lock[index]);
-  }
+  RDLOCK_HASH_LOOP(keys, num_pairs, kvs_table, hash);
 
   // Escreve o '[' inicial
   if (write_to_fd(fd, "[") != 0) {
@@ -122,10 +151,7 @@ int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
     free(result);
   }
 
-  for (size_t i = 0; i < num_pairs; i++) {
-    int index = hash(keys[i]);
-    pthread_rwlock_unlock(&kvs_table->hash_lock[index]);
-  }
+  UNLOCK_HASH_LOOP(keys, num_pairs, kvs_table, hash);
 
   // Escreve o ']' final
   if (write_to_fd(fd, "]\n") != 0) {
@@ -141,6 +167,8 @@ int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
     return 1;
   }
   
+  WRLOCK_HASH_LOOP(keys, num_pairs, kvs_table, hash);
+
   int aux = 0;
   char line[MAX_STRING_SIZE];
 
@@ -173,14 +201,18 @@ int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
     }
   }
 
+  UNLOCK_HASH_LOOP(keys, num_pairs, kvs_table, hash);
+
   return 0;
 }
 
 
 void kvs_show(int fd) {
 
+  ALL_RDLOCK_HASH_LOOP(TABLE_SIZE, kvs_table);
+  
   for (int i = 0; i < TABLE_SIZE; i++) {
-    KeyNode *keyNode = kvs_table->table[i];
+    KeyNode *keyNode = kvs_table->table[i];  //PODEMOS DAR UNLOCK A MEDIDA QUE JA LEMOS OU SO PODEMOS DAR NO FINAL?
     while (keyNode != NULL) {
       char buffer[MAX_WRITE_SIZE];
       int written = snprintf(buffer, MAX_WRITE_SIZE, "(%s, %s)\n", keyNode->key, keyNode->value);
@@ -198,6 +230,8 @@ void kvs_show(int fd) {
       keyNode = keyNode->next; // Move to the next node
     }
   }
+
+  ALL_UNLOCK_HASH_LOOP(TABLE_SIZE, kvs_table);
 }
 
 int kvs_backup(char* dir_name, char* file_name, int total_backups) {
@@ -241,5 +275,3 @@ void kvs_wait(unsigned int delay_ms) {
 
 
 
-// mutex write 
-// ordenar cada write 
