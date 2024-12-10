@@ -1,3 +1,2 @@
-READ [c1,c2]
-BACKUP
+WRITE [(b,v)(c,v)(a,a)]
 

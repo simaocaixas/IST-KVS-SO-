@@ -53,6 +53,11 @@
 
 static struct HashTable* kvs_table = NULL;
 
+
+int compare_keys(const void *a, const void *b) {
+  return strcmp((const char *)a, (const char *)b);
+}
+
 /// writes str into file descriptor
 /// @param str string to write 
 /// @param fd file descriptor 
@@ -100,13 +105,22 @@ int kvs_terminate() {
   return 0;
 }
 
+
 int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE], char values[][MAX_STRING_SIZE]) {
   if (kvs_table == NULL) {
     fprintf(stderr, "KVS state must be initialized\n");
     return 1;
   }
-  
-  WRLOCK_HASH_LOOP(keys, num_pairs, kvs_table, hash);
+
+  char *sorted_keys[num_pairs];
+  for (size_t i = 0; i < num_pairs; i++) {
+      sorted_keys[i] = keys[i]; // Aponta para as chaves originais
+  }
+
+  qsort(sorted_keys, num_pairs, sizeof(char *), compare_keys);  //this needs to be BEFORE LOCK!
+
+
+  WRLOCK_HASH_LOOP(sorted_keys, num_pairs, kvs_table, hash);
 
   for (size_t i = 0; i < num_pairs; i++) {
     if (write_pair(kvs_table, keys[i], values[i]) != 0) {
@@ -124,6 +138,8 @@ int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
     fprintf(stderr, "KVS state must be initialized\n");
     return 1;
   }
+
+  qsort(keys, num_pairs, MAX_STRING_SIZE, compare_keys);  //this needs to be BEFORE LOCK!
 
   RDLOCK_HASH_LOOP(keys, num_pairs, kvs_table, hash);
 
@@ -239,10 +255,10 @@ int kvs_backup(char* dir_name, char* file_name, int total_backups) {
     char line[MAX_STRING_SIZE];
     char path[MAX_STRING_SIZE];
 
-    char *dot = strrchr(file_name, '.');  //APAGA O .JOB OMEUDEUS
+    char *dot = strrchr(file_name, '.');  
     if (dot && strcmp(dot, ".job") == 0) {
         *dot = '\0';
-    }
+    } 
 
     // Verifica se o tamanho dos argumentos não excede o tamanho do buffer
     if (snprintf(line, MAX_STRING_SIZE, "%s-%d", file_name, total_backups) >= MAX_STRING_SIZE) {
