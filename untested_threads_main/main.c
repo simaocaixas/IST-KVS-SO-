@@ -112,6 +112,12 @@ int parse_file(int fd_in,int fd_out,const char *dir_name,char* file_name,int tot
 
       case CMD_BACKUP: {
           pthread_mutex_lock(&backup_lock);
+          
+          if(max_backups == 0) {
+            fprintf(stderr, "There are no available processes to begin backup!\n");
+            pthread_mutex_unlock(&backup_lock);
+            return 0;
+          }
           if (backup_counter >= max_backups) {
               int status;
               pid_t finished_pid = wait(&status); 
