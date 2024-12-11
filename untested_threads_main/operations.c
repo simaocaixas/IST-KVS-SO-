@@ -1,5 +1,3 @@
-
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,10 +10,11 @@
 #include "kvs.h"
 #include "constants.h"
 
-#define WRLOCK_HASH_LOOP(keys, num_pairs, kvs_table, hash) \
-    for (size_t i = 0; i < (num_pairs); i++) { \
+#define WRLOCK_HASH_LOOP(keys, size, kvs_table, hash) \
+    for (size_t i = 0; i < (size); i++) { \
         int index = (hash)((keys)[i]); \
         if (pthread_rwlock_wrlock(&(kvs_table)->hash_lock[index]) != 0) { \
+            printf("%d", index); \
             fprintf(stderr, "Failed to lock write!\n"); \
         } \
     }
@@ -35,8 +34,8 @@
         } \
     }
 
-#define UNLOCK_HASH_LOOP(keys, num_pairs, kvs_table, hash) \
-    for (size_t i = 0; i < (num_pairs); i++) { \
+#define UNLOCK_HASH_LOOP(keys, size, kvs_table, hash) \
+    for (size_t i = 0; i < (size); i++) { \
         int index = (hash)((keys)[i]); \
         if (pthread_rwlock_unlock(&(kvs_table)->hash_lock[index]) != 0) { \
             fprintf(stderr, "Failed to unlock lock!\n"); \
@@ -53,9 +52,20 @@
 
 static struct HashTable* kvs_table = NULL;
 
-
 int compare_keys(const void *a, const void *b) {
-  return strcmp((const char *)a, (const char *)b);
+  if (a != NULL && b != NULL) {
+    return strcmp((const char *)a, (const char *)b);
+  }
+  return 0;
+}
+
+int check_element(int *hashes_seen, size_t size, int element) {
+    for (size_t i = 0; i < size; i++) {
+        if (hashes_seen[i] == element) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 /// writes str into file descriptor
@@ -112,23 +122,40 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE], char values[][MAX_
     return 1;
   }
 
-  char *sorted_keys[num_pairs];
+  // Alocar dinamicamente sorted_keys para armazenar apenas as chaves válidas
+  char *sorted_keys[num_pairs];  // Pode usar um array local aqui, mas será dinâmico no tempo de execução
+  int hashes_seen[num_pairs];
+  size_t size = 0;
+  
   for (size_t i = 0; i < num_pairs; i++) {
-      sorted_keys[i] = keys[i]; // Aponta para as chaves originais
+    hashes_seen[i] = 0;
   }
 
-  qsort(sorted_keys, num_pairs, sizeof(char *), compare_keys);  //this needs to be BEFORE LOCK!
+  // Preencher sorted_keys com as chaves válidas
+  for (size_t i = 0; i < num_pairs; i++) {
+    int hash_index = hash(keys[i]);
+    if (!check_element(hashes_seen, num_pairs, hash_index)) {
+        hashes_seen[size] = hash_index;
+        sorted_keys[size] = keys[i]; // Aponta para as chaves originais
+        size++; 
+    }
+  }
 
+  // Ordenar apenas as chaves válidas
+  qsort(sorted_keys, size, sizeof(char *), compare_keys);  // Ordena apenas até o número de chaves válidas
 
-  WRLOCK_HASH_LOOP(sorted_keys, num_pairs, kvs_table, hash);
+  // Realizar o bloqueio antes de gravar
+  WRLOCK_HASH_LOOP(sorted_keys, size, kvs_table, hash);
 
+  // Gravar os pares chave-valor
   for (size_t i = 0; i < num_pairs; i++) {
     if (write_pair(kvs_table, keys[i], values[i]) != 0) {
       fprintf(stderr, "Failed to write keypair (%s,%s)\n", keys[i], values[i]);
     }
   }
 
-  UNLOCK_HASH_LOOP(sorted_keys, num_pairs, kvs_table, hash);
+  // Liberar o bloqueio após a escrita
+  UNLOCK_HASH_LOOP(sorted_keys, size, kvs_table, hash);
   
   return 0;
 }
@@ -141,7 +168,20 @@ int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
 
   qsort(keys, num_pairs, MAX_STRING_SIZE, compare_keys);  //this needs to be BEFORE LOCK!
 
-  RDLOCK_HASH_LOOP(keys, num_pairs, kvs_table, hash);
+  char *sorted_keys[num_pairs];  // Pode usar um array local aqui, mas será dinâmico no tempo de execução
+  int hashes_seen[num_pairs];
+  size_t size = 0;
+  
+  for (size_t i = 0; i < num_pairs; i++) {
+  int hash_index = hash(keys[i]);
+  if (!check_element(hashes_seen, num_pairs, hash_index)) {
+        hashes_seen[size] = hash_index;
+        sorted_keys[size] = keys[i]; // Aponta para as chaves originais
+        size++; 
+    }
+  }
+
+  RDLOCK_HASH_LOOP(sorted_keys, size, kvs_table, hash);
 
   // Escreve o '[' inicial
   if (write_to_fd(fd, "[") != 0) {
@@ -167,7 +207,7 @@ int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
     free(result);
   }
 
-  UNLOCK_HASH_LOOP(keys, num_pairs, kvs_table, hash);
+  UNLOCK_HASH_LOOP(sorted_keys, size, kvs_table, hash);
 
   // Escreve o ']' final
   if (write_to_fd(fd, "]\n") != 0) {
@@ -183,14 +223,22 @@ int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
     return 1;
   }
 
-  char *sorted_keys[num_pairs];
+  qsort(keys, num_pairs, MAX_STRING_SIZE, compare_keys);  //this needs to be BEFORE LOCK!
+
+  char *sorted_keys[num_pairs];  // Pode usar um array local aqui, mas será dinâmico no tempo de execução
+  int hashes_seen[num_pairs];
+  size_t size = 0;
+  
   for (size_t i = 0; i < num_pairs; i++) {
-      sorted_keys[i] = keys[i]; // Aponta para as chaves originais
+    int hash_index = hash(keys[i]);
+    if (!check_element(hashes_seen, num_pairs, hash_index)) {
+        hashes_seen[size] = hash_index;
+        sorted_keys[size] = keys[i]; // Aponta para as chaves originais
+        size++; 
+    }
   }
 
-  qsort(sorted_keys, num_pairs, sizeof(char *), compare_keys);  //this needs to be BEFORE LOCK!
-  
-  WRLOCK_HASH_LOOP(sorted_keys, num_pairs, kvs_table, hash);
+  WRLOCK_HASH_LOOP(sorted_keys, size, kvs_table, hash);
 
   int aux = 0;
   char line[MAX_STRING_SIZE];
@@ -224,7 +272,7 @@ int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
     }
   }
 
-  UNLOCK_HASH_LOOP(sorted_keys, num_pairs, kvs_table, hash);
+  UNLOCK_HASH_LOOP(sorted_keys, size, kvs_table, hash);
 
   return 0;
 }

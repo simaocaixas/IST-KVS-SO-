@@ -1,11 +1,2 @@
-READ [key1,key2]
-WRITE [(key1,value1)(key2,value2)(key3,value3)]
-READ [key2,key4]
-WRITE [(key2,newvalue2)(key4,value4)(key5,value5)]
-DELETE [key1,key6]
-READ [key1,key2,key5]
-BACKUP
-SHOW
-WRITE [(key1,newvalue1)(key2,newerValue2)(key6,value6)(key7,value7)(key8,value8)]
-READ [key1,key8,key9]
-DELETE [key2,key3,key8]
+WAIT 3000
+WRITE [(c1,v1)(c2,v2)(c3,v3)]

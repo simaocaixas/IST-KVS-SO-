@@ -241,7 +241,8 @@ void *process_file(void *arg) {
 }
 
 int main(int argc, char** argv) {
-
+  
+  // checks if correct number of parameters 
   if (argc < 3) {
       fprintf(stderr, "Usage: %s <arg1> <max_backups>\n", argv[0]);
       return 1;
@@ -252,18 +253,19 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  max_threads = atoi(argv[3]);
-  max_backups = atoi(argv[2]); 
-  char *dir_name = argv[1];
+  char *dir_name = argv[1];             
   
+  // max_threads and max_backups minimum values should be 1,0
+  max_backups = atoi(argv[2]);
+  max_threads = atoi(argv[3]);
   pthread_t threads[max_threads];
-  dir = opendir(dir_name);
-
-  if (!dir) {
+  
+  if ((dir = opendir(dir_name)) == NULL) {
     perror("Failed to open directory");
     return 1;
   }
 
+  // create all threads and each one will start processing a file from dir
   for (int i = 0; i < max_threads; i++) {
     
     if (pthread_create(&threads[i], NULL, process_file,(void*)dir_name) != 0) {
