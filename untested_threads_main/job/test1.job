@@ -1,7 +1,0 @@
-WRITE [(c1,v1)(c2,v2)(c3,v3)]
-WRITE [(a,v1)(b,v2)(c,v3)]
-DELETE [c1,c2,c10,c11,c12,c13,c3]
-SHOW
-DELETE [a]
-READ [a,c]
-

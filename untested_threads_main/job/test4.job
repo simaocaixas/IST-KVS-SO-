@@ -1,0 +1,46 @@
+WRITE [(key1,value1)(key2,value2)(key3,value3)]
+WRITE [(key4,value4)(key5,value5)]
+READ [key1,key3,key5]
+READ [missingKey1,missingKey2]
+# Teste 4: Atualizando valores de chaves existentes
+WRITE [(key1,updatedValue1)(key3,updatedValue3)]
+READ [key1,key3]
+# Teste 5: Eliminando chaves existentes
+DELETE [key2,key4]
+SHOW
+# Teste 6: Eliminando chaves inexistentes
+DELETE [missingKey1,key5]
+READ [key5]
+# Teste 7: Adicionando mais chaves para verificar ordenação
+WRITE [(zKey,zValue)(aKey,aValue)(mKey,mValue)(bKey,bValue)]
+SHOW
+# Teste 8: Backup e modificações subsequentes
+WRITE [(backupKey1,backupValue1)]
+DELETE [key1,key3]
+SHOW
+# Teste 9: Vários comandos READ seguidos
+READ [aKey,bKey]
+READ [mKey,zKey]
+READ [missingKey3,missingKey4]
+# Teste 10: Comando WAIT para simulação de atraso
+WAIT 1000
+SHOW
+# Teste 11: Mais escritas e backups
+WRITE [(newKey1,newValue1)(newKey2,newValue2)]
+READ [newKey1,newKey2]
+# Teste 12: Stress test com muitas escritas
+WRITE [(k1,v1)(k2,v2)(k3,v3)(k4,v4)(k5,v5)(k6,v6)(k7,v7)(k8,v8)(k9,v9)(k10,v10)]
+WRITE [(k11,v11)(k12,v12)(k13,v13)(k14,v14)(k15,v15)(k16,v16)(k17,v17)(k18,v18)(k19,v19)(k20,v20)]
+SHOW
+
+# Teste 13: Backup após muitas operações
+
+# Teste 14: Espera para garantir sincronização
+WAIT 2000
+SHOW
+
+# Teste 15: Tentativa de leitura e eliminação em tabela cheia
+READ [k1,k10,k20]
+DELETE [k1,WRITE [(backupKey,backupValue)]
+
+WRITE [(newKey,newValue)]

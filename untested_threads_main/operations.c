@@ -173,6 +173,10 @@ int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
   size_t size = 0;
   
   for (size_t i = 0; i < num_pairs; i++) {
+    hashes_seen[i] = 0;
+  }
+
+  for (size_t i = 0; i < num_pairs; i++) {
   int hash_index = hash(keys[i]);
   if (!check_element(hashes_seen, num_pairs, hash_index)) {
         hashes_seen[size] = hash_index;
