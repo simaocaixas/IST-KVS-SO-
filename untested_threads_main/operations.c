@@ -51,6 +51,7 @@
 
 static struct HashTable* kvs_table = NULL;
 
+
 int compare_keys(const void *a, const void *b) {
   if (a != NULL && b != NULL) {
     return strcmp((const char *)a, (const char *)b);
@@ -58,6 +59,7 @@ int compare_keys(const void *a, const void *b) {
   return 0;
 }
 
+// Checks if element is in a list hashes_seen
 int check_element(int *hashes_seen, size_t size, int element) {
     for (size_t i = 0; i < size; i++) {
         if (hashes_seen[i] == element) {
@@ -121,39 +123,39 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE], char values[][MAX_
     return 1;
   }
 
-  // Ordenar apenas as chaves válidas
-  qsort(keys, num_pairs, MAX_STRING_SIZE, compare_keys);  // Ordena apenas até o número de chaves válidas
+  // Sort Keys
+  qsort(keys, num_pairs, MAX_STRING_SIZE, compare_keys); 
 
-  // Alocar dinamicamente sorted_keys para armazenar apenas as chaves válidas
-  char *sorted_keys[num_pairs];  // Pode usar um array local aqui, mas será dinâmico no tempo de execução
+  char *sorted_keys[num_pairs];  
   int hashes_seen[num_pairs];
   size_t size = 0;
   
+  // Inicializes hashes_seen with a negative number to prevent lost of hashes
   for (size_t i = 0; i < num_pairs; i++) {
     hashes_seen[i] = -10000;
   }
 
-  // Preencher sorted_keys com as chaves válidas
+  // Add hash key sorted to hashes_seen
   for (size_t i = 0; i < num_pairs; i++) {
     int hash_index = hash(keys[i]);
     if (!check_element(hashes_seen, num_pairs, hash_index)) {
         hashes_seen[size] = hash_index;
-        sorted_keys[size] = keys[i]; // Aponta para as chaves originais
+        sorted_keys[size] = keys[i];
         size++; 
     }
   }
 
-  // Realizar o bloqueio antes de gravar
+  // Lock selected hash keys of kvs_table for writing
   WRLOCK_HASH_LOOP(sorted_keys, size, kvs_table, hash);
 
-  // Gravar os pares chave-valor
+  // Write each pair in kvs_table
   for (size_t i = 0; i < num_pairs; i++) {
     if (write_pair(kvs_table, keys[i], values[i]) != 0) {
       fprintf(stderr, "Failed to write keypair (%s,%s)\n", keys[i], values[i]);
     }
   }
 
-  // Liberar o bloqueio após a escrita
+  // Unock selected hash keys of kvs_table
   UNLOCK_HASH_LOOP(sorted_keys, size, kvs_table, hash);
   
   return 0;
@@ -165,28 +167,32 @@ int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
     return 1;
   }
 
-  qsort(keys, num_pairs, MAX_STRING_SIZE, compare_keys);  //this needs to be BEFORE LOCK!
+  // Sort Keys
+  qsort(keys, num_pairs, MAX_STRING_SIZE, compare_keys);
 
-  char *sorted_keys[num_pairs];  // Pode usar um array local aqui, mas será dinâmico no tempo de execução
+  char *sorted_keys[num_pairs];
   int hashes_seen[num_pairs];
   size_t size = 0;
   
+  // Inicializes hashes_seen with a negative number to prevent lost of hashes
   for (size_t i = 0; i < num_pairs; i++) {
     hashes_seen[i] = -1000;
   }
 
+  // Add hash key sorted to hashes_seen
   for (size_t i = 0; i < num_pairs; i++) {
-  int hash_index = hash(keys[i]);
-  if (!check_element(hashes_seen, num_pairs, hash_index)) {
+    int hash_index = hash(keys[i]);
+    if (!check_element(hashes_seen, num_pairs, hash_index)) {
         hashes_seen[size] = hash_index;
-        sorted_keys[size] = keys[i]; // Aponta para as chaves originais
+        sorted_keys[size] = keys[i];
         size++; 
     }
   }
 
+  // Lock selected hash keys of kvs_table for reading
   RDLOCK_HASH_LOOP(sorted_keys, size, kvs_table, hash);
 
-  // Escreve o '[' inicial
+  // Write initial '['
   if (write_to_fd(fd, "[") != 0) {
     return 1;
   }
@@ -201,7 +207,7 @@ int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
       snprintf(line, MAX_STRING_SIZE, "(%s,%s)", keys[i], result);
     }
 
-    // Escreve o par atual
+    // Write pair to fd
     if (write_to_fd(fd, line) != 0) {
       free(result);
       return 1;
@@ -210,9 +216,10 @@ int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
     free(result);
   }
 
+  // Unlock selected hash keys of kvs_table
   UNLOCK_HASH_LOOP(sorted_keys, size, kvs_table, hash);
 
-  // Escreve o ']' final
+  // Write last ']\n' 
   if (write_to_fd(fd, "]\n") != 0) {
     return 1;
   }
@@ -226,25 +233,29 @@ int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
     return 1;
   }
 
-  qsort(keys, num_pairs, MAX_STRING_SIZE, compare_keys);  //this needs to be BEFORE LOCK!
+  // Sort Keys
+  qsort(keys, num_pairs, MAX_STRING_SIZE, compare_keys); 
 
-  char *sorted_keys[num_pairs];  // Pode usar um array local aqui, mas será dinâmico no tempo de execução
+  char *sorted_keys[num_pairs]; 
   int hashes_seen[num_pairs];
   size_t size = 0;
 
+  // Inicializes hashes_seen with a negative number to prevent lost of hashes
   for (size_t i = 0; i < num_pairs; i++) {
     hashes_seen[i] = -10000;
   }
   
+  // Add hash key sorted to hashes_seen
   for (size_t i = 0; i < num_pairs; i++) {
     int hash_index = hash(keys[i]);
     if (!check_element(hashes_seen, num_pairs, hash_index)) {
         hashes_seen[size] = hash_index;
-        sorted_keys[size] = keys[i]; // Aponta para as chaves originais
+        sorted_keys[size] = keys[i];
         size++; 
     }
   }
 
+  // Lock selected hash keys of kvs_table for writing
   WRLOCK_HASH_LOOP(sorted_keys, size, kvs_table, hash);
 
   int aux = 0;
@@ -253,7 +264,7 @@ int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
   for (size_t i = 0; i < num_pairs; i++) {
     if (delete_pair(kvs_table, keys[i]) != 0) {
       if (!aux) {
-        // Escreve o "[" inicial
+        // Write initial "["
         if (write_to_fd(fd, "[") != 0) {
           fprintf(stderr, "Could not write\n");
           return 1;
@@ -263,22 +274,23 @@ int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
 
       snprintf(line, MAX_STRING_SIZE, "(%s,KVSMISSING)", keys[i]);
 
-      // Escreve o par atual
+      // Write pair to fd
       if (write_to_fd(fd, line) != 0) {
         fprintf(stderr, "Could not delete key-value\n");
-        return 1; // Sai imediatamente se ocorrer falha no write
+        return 1;
       }
     }
   }
 
   if (aux) {
-    // Escreve o "]\n" final
+    // Write final ']\n'
     if (write_to_fd(fd, "]\n") != 0) {
       fprintf(stderr, "Could not write\n");
       return 1;
     }
   }
 
+  // Unlock selected hash keys of kvs_table
   UNLOCK_HASH_LOOP(sorted_keys, size, kvs_table, hash);
 
   return 0;
@@ -287,10 +299,11 @@ int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
 
 void kvs_show(int fd) {
 
+  // Lock every hash_index from kvs_table
   ALL_RDLOCK_HASH_LOOP(TABLE_SIZE, kvs_table);
   
   for (int i = 0; i < TABLE_SIZE; i++) {
-    KeyNode *keyNode = kvs_table->table[i];  //PODEMOS DAR UNLOCK A MEDIDA QUE JA LEMOS OU SO PODEMOS DAR NO FINAL?
+    KeyNode *keyNode = kvs_table->table[i];
     while (keyNode != NULL) {
       char buffer[MAX_WRITE_SIZE];
       int written = snprintf(buffer, MAX_WRITE_SIZE, "(%s, %s)\n", keyNode->key, keyNode->value);
@@ -305,17 +318,18 @@ void kvs_show(int fd) {
         return;
       }
       
-      keyNode = keyNode->next; // Move to the next node
+      keyNode = keyNode->next;
     }
   }
 
+  // Unlock every hash_index from kvs_table
   ALL_UNLOCK_HASH_LOOP(TABLE_SIZE, kvs_table);
 }
 
 void kvs_show_safe(int fd) {
   
   for (int i = 0; i < TABLE_SIZE; i++) {
-    KeyNode *keyNode = kvs_table->table[i];  //PODEMOS DAR UNLOCK A MEDIDA QUE JA LEMOS OU SO PODEMOS DAR NO FINAL?
+    KeyNode *keyNode = kvs_table->table[i];
     while (keyNode != NULL) {
       char buffer[MAX_WRITE_SIZE];
       int written = snprintf(buffer, MAX_WRITE_SIZE, "(%s, %s)\n", keyNode->key, keyNode->value);
@@ -330,7 +344,7 @@ void kvs_show_safe(int fd) {
         return;
       }
       
-      keyNode = keyNode->next; // Move to the next node
+      keyNode = keyNode->next;
     }
   }
 }
@@ -342,7 +356,10 @@ int kvs_backup(char* path) {
         perror("Failed to open backup file");
         return 1;
     }
+
+    // No need for locks (prevents risks)
     kvs_show_safe(fd_out);
+    
     if (close(fd_out) < 0) {
         fprintf(stderr, "Failed to close backup file\n");
         return 1;

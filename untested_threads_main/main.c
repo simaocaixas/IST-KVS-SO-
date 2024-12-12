@@ -119,6 +119,7 @@ int parse_file(int fd_in,int fd_out,const char *dir_name,char* file_name,int tot
             return 0;
           }
           
+          // Check if there are available processes to backup
           pthread_mutex_lock(&backup_lock);
           if (backup_counter >= max_backups) {
               int status;
@@ -142,13 +143,13 @@ int parse_file(int fd_in,int fd_out,const char *dir_name,char* file_name,int tot
               *dot = '\0';
           } 
 
-          // Checks if arguments size doesn't exceed st size
+          // Numeration of .bck file
           if (snprintf(line, MAX_STRING_SIZE, "%s-%d", file_name, total_backups + 1) >= MAX_STRING_SIZE) {
             fprintf(stderr, "Error: File name exceeds buffer size.\n");
             return 1;
           }
 
-          // Checks if arguments size doesn't exceed string size
+          // Creation of .bck file's path
           if (snprintf(path, MAX_STRING_SIZE, "%s/%s.bck", dir_name, line) >= MAX_STRING_SIZE) {
             fprintf(stderr, "Error: Path exceeds buffer size.\n");
             return 1;
@@ -156,11 +157,13 @@ int parse_file(int fd_in,int fd_out,const char *dir_name,char* file_name,int tot
 
           pid_t pid = fork();
           if (pid < 0) {
-              fprintf(stderr, "Failed to fork.\n");
-              pthread_mutex_unlock(&backup_lock);
-              return 0;
-          } else if (pid == 0) {
 
+              fprintf(stderr, "Failed to fork.\n");
+              pthread_mutex_unlock(&backup_lock);   // Unlock mutex in case of failed attempt to fork
+              return 0;
+
+          } else if (pid == 0) {
+              // Perform backup
               if (kvs_backup(path)) {
                   fprintf(stderr, "Failed to perform backup.\n");
 
@@ -200,6 +203,7 @@ int parse_file(int fd_in,int fd_out,const char *dir_name,char* file_name,int tot
               
               exit(0); 
           } else {
+            
               pthread_mutex_lock(&backup_lock);
               total_backups++;
               backup_counter++; 
@@ -282,13 +286,14 @@ void *process_file(void *arg) {
 
     while (1) {
         pthread_mutex_lock(&dir_lock);
-        local_entry = readdir(dir);
+        local_entry = readdir(dir);        // Reads dir for file entry 
         pthread_mutex_unlock(&dir_lock);
 
         if (local_entry == NULL) {
             break;
         }
 
+        // generates .out file and parses it
         if (generate_paths(dir_name, local_entry, in_path, out_path)) {
             int fd_in = open(in_path, O_RDONLY);
             int fd_out = open(out_path, O_WRONLY | O_CREAT, 00700);
