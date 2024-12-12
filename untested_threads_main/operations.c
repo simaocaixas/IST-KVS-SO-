@@ -121,6 +121,9 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE], char values[][MAX_
     return 1;
   }
 
+  // Ordenar apenas as chaves válidas
+  qsort(keys, num_pairs, MAX_STRING_SIZE, compare_keys);  // Ordena apenas até o número de chaves válidas
+
   // Alocar dinamicamente sorted_keys para armazenar apenas as chaves válidas
   char *sorted_keys[num_pairs];  // Pode usar um array local aqui, mas será dinâmico no tempo de execução
   int hashes_seen[num_pairs];
@@ -139,9 +142,6 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE], char values[][MAX_
         size++; 
     }
   }
-
-  // Ordenar apenas as chaves válidas
-  qsort(sorted_keys, size, sizeof(char *), compare_keys);  // Ordena apenas até o número de chaves válidas
 
   // Realizar o bloqueio antes de gravar
   WRLOCK_HASH_LOOP(sorted_keys, size, kvs_table, hash);

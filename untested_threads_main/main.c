@@ -112,14 +112,14 @@ int parse_file(int fd_in,int fd_out,const char *dir_name,char* file_name,int tot
 
       case CMD_BACKUP: {
 
-          pthread_mutex_lock(&backup_lock);
           
           if(max_backups == 0) {
             fprintf(stderr, "There are no available processes to begin backup!\n");
             pthread_mutex_unlock(&backup_lock);
             return 0;
           }
-
+          
+          pthread_mutex_lock(&backup_lock);
           if (backup_counter >= max_backups) {
               int status;
               pid_t finished_pid = wait(&status); 
@@ -132,6 +132,7 @@ int parse_file(int fd_in,int fd_out,const char *dir_name,char* file_name,int tot
                 backup_counter--;
               }
           }
+          pthread_mutex_unlock(&backup_lock);
     
           char line[MAX_STRING_SIZE];
           char path[MAX_STRING_SIZE];
@@ -141,12 +142,13 @@ int parse_file(int fd_in,int fd_out,const char *dir_name,char* file_name,int tot
               *dot = '\0';
           } 
 
-          // Verifica se o tamanho dos argumentos não excede o tamanho do buffer
+          // Checks if arguments size doesn't exceed st size
           if (snprintf(line, MAX_STRING_SIZE, "%s-%d", file_name, total_backups + 1) >= MAX_STRING_SIZE) {
             fprintf(stderr, "Error: File name exceeds buffer size.\n");
             return 1;
           }
 
+          // Checks if arguments size doesn't exceed string size
           if (snprintf(path, MAX_STRING_SIZE, "%s/%s.bck", dir_name, line) >= MAX_STRING_SIZE) {
             fprintf(stderr, "Error: Path exceeds buffer size.\n");
             return 1;
@@ -161,24 +163,49 @@ int parse_file(int fd_in,int fd_out,const char *dir_name,char* file_name,int tot
 
               if (kvs_backup(path)) {
                   fprintf(stderr, "Failed to perform backup.\n");
-                  pthread_mutex_unlock(&backup_lock);
-                  close(fd_out);
-                  close(fd_in);
-                  closedir(dir);
-                  kvs_terminate();
+
+                  if (close(fd_out) < 0) {
+                      fprintf(stderr, "Failed to close file...\n");
+                  }
+
+                  if (close(fd_in) < 0) {
+                      fprintf(stderr, "Failed to close file...\n");
+                  }
+
+                  if (closedir(dir) < 0) {
+                      fprintf(stderr, "Failed to close directory...\n");
+                  }
+                  if (kvs_terminate() == 1) {
+                      fprintf(stderr, "Failed to free table\n");
+                  }
+
                   exit(1); 
               }
-              close(fd_out); 
-              close(fd_in);
-              pthread_mutex_unlock(&backup_lock);
-              kvs_terminate();
-              closedir(dir);
+
+              if (close(fd_out) < 0) {
+                  fprintf(stderr, "Failed to close file...\n");
+              }
+
+              if (close(fd_in) < 0) {
+                  fprintf(stderr, "Failed to close file...\n");
+                }
+
+              if (kvs_terminate() == 1) {
+                  fprintf(stderr, "Failed to free table\n");
+              }
+              
+              if (closedir(dir) < 0) {
+                  fprintf(stderr, "Failed to close directory...\n");
+              }
+              
               exit(0); 
           } else {
+              pthread_mutex_lock(&backup_lock);
               total_backups++;
               backup_counter++; 
+              pthread_mutex_unlock(&backup_lock);
+
           }
-          pthread_mutex_unlock(&backup_lock);
           break;
       }
 
@@ -206,6 +233,15 @@ int parse_file(int fd_in,int fd_out,const char *dir_name,char* file_name,int tot
   return 1;
 }
 
+/**
+ * Generates input and output file paths for processing files with a ".job" extension.
+ *
+ * @param dir_name The name of the directory containing the files.
+ * @param dir_entry A pointer to a `struct dirent` representing the file entry.
+ * @param in_path A buffer to store the generated input path.
+ * @param out_path A buffer to store the generated output path.
+ * @return 1 if the paths were successfully generated for a ".job" file, 0 otherwise.
+ */
 int generate_paths(const char *dir_name, struct dirent *dir_entry, char *in_path, char *out_path) {
     char *file_name = dir_entry->d_name;
 
@@ -231,6 +267,13 @@ int generate_paths(const char *dir_name, struct dirent *dir_entry, char *in_path
     return 1;
 }
 
+/**
+ * Processes files from a directory in a multithreaded environment. 
+ * Reads file entries, generates input/output paths, and processes files with a ".job" extension.
+ *
+ * @param arg A `void*` argument pointing to the directory name (expected to be `const char*`).
+ * @return NULL on completion. This function is designed to be used as a thread entry point.
+ */
 void *process_file(void *arg) {
   
     struct dirent *local_entry;
@@ -279,7 +322,6 @@ int main(int argc, char** argv) {
 
   char *dir_name = argv[1];             
   
-  // max_threads and max_backups minimum values should be 1,0
   max_backups = atoi(argv[2]);
   max_threads = atoi(argv[3]);
   pthread_t threads[max_threads];
@@ -299,11 +341,12 @@ int main(int argc, char** argv) {
     }
   }
 
-  // wait all threads
+  // waits all threads
   for (int i = 0; i < max_threads; i++) {
     pthread_join(threads[i], NULL);
   }
 
+  // waits all processes
   while (wait(NULL) > 0); 
 
   if (closedir(dir) < 0) {
