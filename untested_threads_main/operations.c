@@ -228,6 +228,10 @@ int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
   char *sorted_keys[num_pairs];  // Pode usar um array local aqui, mas será dinâmico no tempo de execução
   int hashes_seen[num_pairs];
   size_t size = 0;
+
+  for (size_t i = 0; i < num_pairs; i++) {
+    hashes_seen[i] = 0;
+  }
   
   for (size_t i = 0; i < num_pairs; i++) {
     int hash_index = hash(keys[i]);
