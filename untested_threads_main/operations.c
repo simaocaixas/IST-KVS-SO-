@@ -14,7 +14,6 @@
     for (size_t i = 0; i < (size); i++) { \
         int index = (hash)((keys)[i]); \
         if (pthread_rwlock_wrlock(&(kvs_table)->hash_lock[index]) != 0) { \
-            printf("%d", index); \
             fprintf(stderr, "Failed to lock write!\n"); \
         } \
     }
@@ -128,7 +127,7 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE], char values[][MAX_
   size_t size = 0;
   
   for (size_t i = 0; i < num_pairs; i++) {
-    hashes_seen[i] = 0;
+    hashes_seen[i] = -10000;
   }
 
   // Preencher sorted_keys com as chaves válidas
@@ -173,7 +172,7 @@ int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
   size_t size = 0;
   
   for (size_t i = 0; i < num_pairs; i++) {
-    hashes_seen[i] = 0;
+    hashes_seen[i] = -1000;
   }
 
   for (size_t i = 0; i < num_pairs; i++) {
@@ -234,7 +233,7 @@ int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
   size_t size = 0;
 
   for (size_t i = 0; i < num_pairs; i++) {
-    hashes_seen[i] = 0;
+    hashes_seen[i] = -10000;
   }
   
   for (size_t i = 0; i < num_pairs; i++) {
@@ -313,33 +312,37 @@ void kvs_show(int fd) {
   ALL_UNLOCK_HASH_LOOP(TABLE_SIZE, kvs_table);
 }
 
-int kvs_backup(char* dir_name, char* file_name, int total_backups) {
+void kvs_show_safe(int fd) {
+  
+  for (int i = 0; i < TABLE_SIZE; i++) {
+    KeyNode *keyNode = kvs_table->table[i];  //PODEMOS DAR UNLOCK A MEDIDA QUE JA LEMOS OU SO PODEMOS DAR NO FINAL?
+    while (keyNode != NULL) {
+      char buffer[MAX_WRITE_SIZE];
+      int written = snprintf(buffer, MAX_WRITE_SIZE, "(%s, %s)\n", keyNode->key, keyNode->value);
+      
+      if (written < 0) {
+        fprintf(stderr, "Failed to format data\n");
+        return;
+      }
 
-    char line[MAX_STRING_SIZE];
-    char path[MAX_STRING_SIZE];
-
-    char *dot = strrchr(file_name, '.');  
-    if (dot && strcmp(dot, ".job") == 0) {
-        *dot = '\0';
-    } 
-
-    // Verifica se o tamanho dos argumentos não excede o tamanho do buffer
-    if (snprintf(line, MAX_STRING_SIZE, "%s-%d", file_name, total_backups) >= MAX_STRING_SIZE) {
-        fprintf(stderr, "Error: File name exceeds buffer size.\n");
-        return 1;
+      if (write_to_fd(fd, buffer) != 0) {
+        perror("Failed to write to file");
+        return;
+      }
+      
+      keyNode = keyNode->next; // Move to the next node
     }
+  }
+}
 
-    if (snprintf(path, MAX_STRING_SIZE, "%s/%s.bck", dir_name, line) >= MAX_STRING_SIZE) {
-        fprintf(stderr, "Error: Path exceeds buffer size.\n");
-        return 1;
-    }
+int kvs_backup(char* path) {
 
     int fd_out = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0700);
     if (fd_out < 0) {
         perror("Failed to open backup file");
         return 1;
     }
-    kvs_show(fd_out);
+    kvs_show_safe(fd_out);
     if (close(fd_out) < 0) {
         fprintf(stderr, "Failed to close backup file\n");
         return 1;

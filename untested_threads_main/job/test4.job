@@ -14,7 +14,8 @@ READ [key5]
 # Teste 7: Adicionando mais chaves para verificar ordenação
 WRITE [(zKey,zValue)(aKey,aValue)(mKey,mValue)(bKey,bValue)]
 SHOW
-# Teste 8: Backup e modificações subsequentes
+# Teste 8:
+up e modificações subsequentes
 WRITE [(backupKey1,backupValue1)]
 DELETE [key1,key3]
 SHOW
@@ -23,7 +24,6 @@ READ [aKey,bKey]
 READ [mKey,zKey]
 READ [missingKey3,missingKey4]
 # Teste 10: Comando WAIT para simulação de atraso
-WAIT 1000
 SHOW
 # Teste 11: Mais escritas e backups
 WRITE [(newKey1,newValue1)(newKey2,newValue2)]
@@ -36,11 +36,8 @@ SHOW
 # Teste 13: Backup após muitas operações
 
 # Teste 14: Espera para garantir sincronização
-WAIT 2000
 SHOW
 
 # Teste 15: Tentativa de leitura e eliminação em tabela cheia
 READ [k1,k10,k20]
-DELETE [k1,WRITE [(backupKey,backupValue)]
-
 WRITE [(newKey,newValue)]

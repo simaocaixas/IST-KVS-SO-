@@ -111,6 +111,7 @@ int parse_file(int fd_in,int fd_out,const char *dir_name,char* file_name,int tot
         break;
 
       case CMD_BACKUP: {
+
           pthread_mutex_lock(&backup_lock);
           
           if(max_backups == 0) {
@@ -118,6 +119,7 @@ int parse_file(int fd_in,int fd_out,const char *dir_name,char* file_name,int tot
             pthread_mutex_unlock(&backup_lock);
             return 0;
           }
+
           if (backup_counter >= max_backups) {
               int status;
               pid_t finished_pid = wait(&status); 
@@ -131,6 +133,25 @@ int parse_file(int fd_in,int fd_out,const char *dir_name,char* file_name,int tot
               }
           }
     
+          char line[MAX_STRING_SIZE];
+          char path[MAX_STRING_SIZE];
+
+          char *dot = strrchr(file_name, '.');  
+          if (dot && strcmp(dot, ".job") == 0) {
+              *dot = '\0';
+          } 
+
+          // Verifica se o tamanho dos argumentos não excede o tamanho do buffer
+          if (snprintf(line, MAX_STRING_SIZE, "%s-%d", file_name, total_backups + 1) >= MAX_STRING_SIZE) {
+            fprintf(stderr, "Error: File name exceeds buffer size.\n");
+            return 1;
+          }
+
+          if (snprintf(path, MAX_STRING_SIZE, "%s/%s.bck", dir_name, line) >= MAX_STRING_SIZE) {
+            fprintf(stderr, "Error: Path exceeds buffer size.\n");
+            return 1;
+          }
+
           pid_t pid = fork();
           if (pid < 0) {
               fprintf(stderr, "Failed to fork.\n");
@@ -138,18 +159,19 @@ int parse_file(int fd_in,int fd_out,const char *dir_name,char* file_name,int tot
               return 0;
           } else if (pid == 0) {
 
-              if (kvs_backup(dir_name,file_name,total_backups + 1)) {
+              if (kvs_backup(path)) {
                   fprintf(stderr, "Failed to perform backup.\n");
                   pthread_mutex_unlock(&backup_lock);
-                  close(fd_out); //adicionar verificacoes (print se falhar)
+                  close(fd_out);
                   close(fd_in);
-                  pthread_mutex_unlock(&backup_lock);
                   closedir(dir);
+                  kvs_terminate();
                   exit(1); 
               }
-              close(fd_out); //adicionar verificacoes (print se falhar)
+              close(fd_out); 
               close(fd_in);
               pthread_mutex_unlock(&backup_lock);
+              kvs_terminate();
               closedir(dir);
               exit(0); 
           } else {
@@ -159,6 +181,7 @@ int parse_file(int fd_in,int fd_out,const char *dir_name,char* file_name,int tot
           pthread_mutex_unlock(&backup_lock);
           break;
       }
+
       case CMD_INVALID:
         fprintf(stderr, "Invalid command. See HELP for usage\n");
         break;
@@ -278,7 +301,9 @@ int main(int argc, char** argv) {
   for (int i = 0; i < max_threads; i++) {
     pthread_join(threads[i], NULL);
   }
-    
+
+  while (wait(NULL) > 0); 
+
   closedir(dir);
   kvs_terminate();
 
