@@ -12,10 +12,14 @@
 #include "parser.h"
 #include "operations.h"
 
+
 int max_backups, max_threads;
 int backup_counter = 0;
+
 DIR *dir;
 struct dirent *entry;
+
+// both static mutexes, for correct read of the directory and backup counter
 pthread_mutex_t dir_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t backup_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -134,6 +138,7 @@ int parse_file(int fd_in,int fd_out,const char *dir_name,char* file_name,int tot
               }
           }
           pthread_mutex_unlock(&backup_lock);
+    
           char line[MAX_STRING_SIZE];
           char path[MAX_STRING_SIZE];
 
@@ -294,9 +299,21 @@ void *process_file(void *arg) {
 
         // generates .out file and parses it
         if (generate_paths(dir_name, local_entry, in_path, out_path)) {
-            int fd_in = open(in_path, O_RDONLY);
-            int fd_out = open(out_path, O_WRONLY | O_CREAT, 00700);
+            
+            // file descriptors for input and output files 
+            int fd_in, fd_out;
             int total_backups = 0;
+
+            // open file.job, to read
+            if ((fd_in = open(in_path, O_RDONLY)) < 0) {
+              fprintf(stderr, "Failed to open input file...\n");
+            }
+            
+            // open file.out, to write, 00700 sets permissions to write,read,exec
+            if ((fd_out = open(out_path, O_WRONLY | O_CREAT, 00700)) < 0) {
+              fprintf(stderr, "Failed to open output file...\n");
+            } 
+          
             parse_file(fd_in, fd_out, dir_name, local_entry->d_name, total_backups);
 
             if (close(fd_in) < 0) {
@@ -324,12 +341,13 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  // max_threads and max_backups minimum values should be 1,0
   char *dir_name = argv[1];             
-  
   max_backups = atoi(argv[2]);
   max_threads = atoi(argv[3]);
   pthread_t threads[max_threads];
   
+  // 
   if ((dir = opendir(dir_name)) == NULL) {
     perror("Failed to open directory");
     return 1;

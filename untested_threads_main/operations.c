@@ -10,15 +10,18 @@
 #include "kvs.h"
 #include "constants.h"
 
+// * MACROS * //
+
+// WRITE LOCKS 
 #define WRLOCK_HASH_LOOP(sorted_keys, size, kvs_table, hash) \
     for (size_t i = 0; i < (size); i++) { \
         int index = (hash)((sorted_keys)[i]); \
-          printf("%d\n", index); \
         if (pthread_rwlock_wrlock(&(kvs_table)->hash_lock[index]) != 0) { \
             fprintf(stderr, "Failed to lock write!\n"); \
         } \
     }
 
+// READ LOCKS EVERY HASH
 #define ALL_RDLOCK_HASH_LOOP(num_pairs, kvs_table) \
     for (size_t i = 0; i < (num_pairs); i++) { \
         if (pthread_rwlock_rdlock(&(kvs_table)->hash_lock[i]) != 0) { \
@@ -26,15 +29,16 @@
         } \
     }
 
+// READ LOCKS
 #define RDLOCK_HASH_LOOP(keys, num_pairs, kvs_table, hash) \
     for (size_t i = 0; i < (num_pairs); i++) { \
         int index = (hash)((keys)[i]); \
-        printf("%d\n", index); \
         if (pthread_rwlock_rdlock(&(kvs_table)->hash_lock[index]) != 0) { \
             fprintf(stderr, "Failed to lock read!\n"); \
         } \
     }
 
+// UNLOCK LOCKS
 #define UNLOCK_HASH_LOOP(sorted_keys, size, kvs_table, hash) \
     for (size_t i = 0; i < (size); i++) { \
         int index = (hash)((sorted_keys)[i]); \
@@ -43,6 +47,7 @@
         } \
     }
     
+// UNLOCK LOCKS EVERY HASH
 #define ALL_UNLOCK_HASH_LOOP(num_pairs, kvs_table) \
     for (size_t i = 0; i < (num_pairs); i++) { \
         if (pthread_rwlock_unlock(&(kvs_table)->hash_lock[i]) != 0) { \
@@ -50,10 +55,15 @@
         } \
     }
 
-
 static struct HashTable* kvs_table = NULL;
 
-
+/**
+ * Compares two keys for kvs_write and kvs_delete. Compares a char of chars.
+ * 
+ * @param a Pointer to the first key. 
+ * @param b Pointer to the second key.
+ * @return Negative value if a < b, zero if a == b, positive value if a > b.
+ */
 int compare_keys(const void *a, const void *b) {
   if (a != NULL && b != NULL) {
     return strcmp(*(const char **)a, *(const char **)b);
@@ -61,14 +71,28 @@ int compare_keys(const void *a, const void *b) {
   return 0;
 }
 
-int compare_keyss(const void *a, const void *b) {
+/**
+ * Compares two keys for kvs_read. Compares a char of strings.
+ * 
+ * @param a Pointer to the first key.
+ * @param b Pointer to the second key.
+ * @return Negative value if a < b, zero if a == b, positive value if a > b.
+ */
+int compare_keys_read(const void *a, const void *b) {
   if (a != NULL && b != NULL) {
     return strcmp((const char *)a, (const char *)b);
   }
   return 0;
 }
 
-// Checks if element is in a list hashes_seen
+/**
+ * Checks if an element is in a list of hashes_seen to prevent deadlocks.
+ * 
+ * @param hashes_seen Array of seen hashes.
+ * @param size Size of the array.
+ * @param element Element to check.
+ * @return 1 if the element is in the list, 0 otherwise.
+ */
 int check_element(int *hashes_seen, size_t size, int element) {
     for (size_t i = 0; i < size; i++) {
         if (hashes_seen[i] == element) {
@@ -78,9 +102,24 @@ int check_element(int *hashes_seen, size_t size, int element) {
     return 0;
 }
 
-/// writes str into file descriptor
-/// @param str string to write 
-/// @param fd file descriptor 
+/// Checks if hash is valid
+/// @param hash string to write
+/// @return 1 if hash is valid, 0 otherwise 
+int check_hash(int hash) {
+  if(hash < 0 || hash > 25) {
+    fprintf(stderr, "Invalid hash value!\n");
+    return 0;
+  }
+  return 1;
+}
+
+/**
+ * Writes a string to a file descriptor.
+ * 
+ * @param fd File descriptor.
+ * @param str String to write.
+ * @return 0 on success, 1 on failure.
+ */
 int write_to_fd(int fd, const char *str) {
     size_t len = strlen(str);
     ssize_t written = 0;
@@ -104,6 +143,11 @@ static struct timespec delay_to_timespec(unsigned int delay_ms) {
   return (struct timespec){delay_ms / 1000, (delay_ms % 1000) * 1000000};
 }
 
+/**
+ * Initializes the KVS state.
+ * 
+ * @return 0 on success, 1 if the KVS state has already been initialized.
+ */
 int kvs_init() {
   if (kvs_table != NULL) {
     fprintf(stderr, "KVS state has already been initialized\n");
@@ -115,6 +159,11 @@ int kvs_init() {
   return kvs_table == NULL;
 }
 
+/**
+ * Terminates the KVS state.
+ * 
+ * @return 0 on success, 1 if the KVS state has not been initialized.
+ */
 int kvs_terminate() {
   if (kvs_table == NULL) {
     fprintf(stderr, "KVS state must be initialized\n");
@@ -125,18 +174,28 @@ int kvs_terminate() {
   return 0;
 }
 
-
+/**
+ * Writes key-value pairs to the KVS.
+ * 
+ * @param num_pairs Number of key-value pairs.
+ * @param keys Array of keys.
+ * @param values Array of values.
+ * @return 0 on success, 1 on failure.
+ */
 int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE], char values[][MAX_STRING_SIZE]) {
   if (kvs_table == NULL) {
     fprintf(stderr, "KVS state must be initialized\n");
     return 1;
   }
 
-
   char *sorted_keys[num_pairs];  
+  char *approved_keys[num_pairs];  
+  char *approved_values[num_pairs];  
+
   int hashes_seen[num_pairs];
   size_t size = 0;
-  
+  size_t approved_index = 0;
+
   // Inicializes hashes_seen with a negative number to prevent lost of hashes
   for (size_t i = 0; i < num_pairs; i++) {
     hashes_seen[i] = -10000;
@@ -145,27 +204,30 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE], char values[][MAX_
   // Add hash key sorted to hashes_seen
   for (size_t i = 0; i < num_pairs; i++) {
     int hash_index = hash(keys[i]);
-    if (!check_element(hashes_seen, num_pairs, hash_index)) {
+
+    if (check_hash(hash_index) == 1) {
+      approved_keys[approved_index] = keys[i];
+      approved_values[approved_index] = values[i];
+      approved_index++;
+      
+      if (!check_element(hashes_seen, num_pairs, hash_index)) {
         hashes_seen[size] = hash_index;
         sorted_keys[size] = keys[i];
         size++;       
+      }
     }
   }
 
   // Sort Keys 
   qsort(sorted_keys, size, sizeof(char *), compare_keys); 
 
-  for (size_t i = 0; i < size; i++) {
-    printf("sorted: %s\n", sorted_keys[i]);
-  }
-
   // Lock selected hash keys of kvs_table for writing
   WRLOCK_HASH_LOOP(sorted_keys, size, kvs_table, hash);
 
   // Write each pair in kvs_table
-  for (size_t i = 0; i < num_pairs; i++) {
-    if (write_pair(kvs_table, keys[i], values[i]) != 0) {
-      fprintf(stderr, "Failed to write keypair (%s,%s)\n", keys[i], values[i]);
+  for (size_t i = 0; i < approved_index; i++) {
+    if (write_pair(kvs_table, approved_keys[i], approved_values[i]) != 0) {
+      fprintf(stderr, "Failed to write keypair (%s,%s)\n", approved_keys[i], approved_values[i]);
     }
   }
 
@@ -175,39 +237,51 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE], char values[][MAX_
   return 0;
 }
 
+/**
+ * Reads key-value pairs from the KVS.
+ * 
+ * @param num_pairs Number of keys.
+ * @param keys Array of keys.
+ * @param fd File descriptor to write the output.
+ * @return 0 on success, 1 on failure.
+ */
 int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
   if (kvs_table == NULL) {
     fprintf(stderr, "KVS state must be initialized\n");
     return 1;
   }
   
-  
   // Sort Keys
-  qsort(keys, num_pairs, MAX_STRING_SIZE, compare_keyss);
+  qsort(keys, num_pairs, MAX_STRING_SIZE, compare_keys_read);
   
-  char *sorted_keys[num_pairs];
+  char *sorted_keys[num_pairs];  
+  char *approved_keys[num_pairs];  
+
   int hashes_seen[num_pairs];
   size_t size = 0;
+  size_t approved_index = 0;
   
   // Inicializes hashes_seen with a negative number to prevent lost of hashes
   for (size_t i = 0; i < num_pairs; i++) {
-    hashes_seen[i] = -1000;
+    hashes_seen[i] = -10000;
   }
 
   // Add hash key sorted to hashes_seen
   for (size_t i = 0; i < num_pairs; i++) {
     int hash_index = hash(keys[i]);
-    if (!check_element(hashes_seen, num_pairs, hash_index)) {
+
+    if (check_hash(hash_index) == 1) {
+      approved_keys[approved_index] = keys[i];
+      approved_index++;
+      
+      if (!check_element(hashes_seen, num_pairs, hash_index)) {
         hashes_seen[size] = hash_index;
         sorted_keys[size] = keys[i];
-        size++; 
+        size++;       
+      }
     }
   }
-  
-  for (size_t i = 0; i < size; i++) {
-    printf("read lock: %s\n", sorted_keys[i]);
-  }
-
+ 
   // Lock selected hash keys of kvs_table for reading
   RDLOCK_HASH_LOOP(sorted_keys, size, kvs_table, hash);
 
@@ -216,15 +290,14 @@ int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
     return 1;
   }
 
-  for (size_t i = 0; i < num_pairs; i++) {
-    printf("Reading key %s\n", keys[i]);
-    char* result = read_pair(kvs_table, keys[i]);
+  for (size_t i = 0; i < approved_index; i++) {
+    char* result = read_pair(kvs_table, approved_keys[i]);
     char line[MAX_STRING_SIZE];
 
     if (result == NULL) {
-      snprintf(line, MAX_STRING_SIZE, "(%s,KVSERROR)", keys[i]); 
+      snprintf(line, MAX_STRING_SIZE, "(%s,KVSERROR)", approved_keys[i]); 
     } else {
-      snprintf(line, MAX_STRING_SIZE, "(%s,%s)", keys[i], result);
+      snprintf(line, MAX_STRING_SIZE, "(%s,%s)", approved_keys[i], result);
     }
 
     // Write pair to fd
@@ -247,34 +320,50 @@ int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
   return 0;
 }
 
+/**
+ * Deletes key-value pairs from the KVS.
+ * 
+ * @param num_pairs Number of keys.
+ * @param keys Array of keys.
+ * @param fd File descriptor to write the output.
+ * @return 0 on success, 1 on failure.
+ */
 int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
   if (kvs_table == NULL) {
     fprintf(stderr, "KVS state must be initialized\n");
     return 1;
   }
 
-  char *sorted_keys[num_pairs]; 
+  char *sorted_keys[num_pairs];  
+  char *approved_keys[num_pairs];  
+
   int hashes_seen[num_pairs];
   size_t size = 0;
-
+  size_t approved_index = 0;
+  
   // Inicializes hashes_seen with a negative number to prevent lost of hashes
   for (size_t i = 0; i < num_pairs; i++) {
     hashes_seen[i] = -10000;
   }
-  
+
   // Add hash key sorted to hashes_seen
   for (size_t i = 0; i < num_pairs; i++) {
     int hash_index = hash(keys[i]);
-    if (!check_element(hashes_seen, num_pairs, hash_index)) {
+
+    if (check_hash(hash_index) == 1) {
+      approved_keys[approved_index] = keys[i];
+      approved_index++;
+      
+      if (!check_element(hashes_seen, num_pairs, hash_index)) {
         hashes_seen[size] = hash_index;
         sorted_keys[size] = keys[i];
-        size++; 
+        size++;       
+      }
     }
   }
 
   // Sort Keys
   qsort(sorted_keys, size, sizeof(char *), compare_keys); 
-
 
   // Lock selected hash keys of kvs_table for writing
   WRLOCK_HASH_LOOP(sorted_keys, size, kvs_table, hash);
@@ -282,9 +371,8 @@ int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
   int aux = 0;
   char line[MAX_WRITE_SIZE];
 
-  for (size_t i = 0; i < num_pairs; i++) {
-    printf("Deleting key %s\n", keys[i]);
-    if (delete_pair(kvs_table, keys[i]) != 0) {
+  for (size_t i = 0; i < approved_index; i++) {
+    if (delete_pair(kvs_table, approved_keys[i]) != 0) {
       if (!aux) {
         // Write initial "["
         if (write_to_fd(fd, "[") != 0) {
@@ -294,7 +382,7 @@ int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
         aux = 1;
       }
 
-      snprintf(line, MAX_WRITE_SIZE, "(%s,KVSMISSING)", keys[i]);
+      snprintf(line, MAX_WRITE_SIZE, "(%s,KVSMISSING)", approved_keys[i]);
 
       // Write pair to fd
       if (write_to_fd(fd, line) != 0) {
@@ -318,7 +406,11 @@ int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
   return 0;
 }
 
-
+/**
+ * Shows all key-value pairs in the KVS.
+ * 
+ * @param fd File descriptor to write the output.
+ */
 void kvs_show(int fd) {
 
   // Lock every hash_index from kvs_table
@@ -348,6 +440,11 @@ void kvs_show(int fd) {
   ALL_UNLOCK_HASH_LOOP(TABLE_SIZE, kvs_table);
 }
 
+/**
+ * Shows all key-value pairs in the KVS without locking.
+ * 
+ * @param fd File descriptor to write the output.
+ */
 void kvs_show_safe(int fd) {
   
   for (int i = 0; i < TABLE_SIZE; i++) {
@@ -371,8 +468,14 @@ void kvs_show_safe(int fd) {
   }
 }
 
+/**
+ * Creates a backup of the KVS.
+ * 
+ * @param path Path to the backup file.
+ * @return 0 on success, 1 on failure.
+ */
 int kvs_backup(char* path) {
-
+    // this is only executed by a child process
     int fd_out = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0700);
     if (fd_out < 0) {
         perror("Failed to open backup file");
@@ -389,6 +492,11 @@ int kvs_backup(char* path) {
     return 0;
 }
 
+/**
+ * Waits for a specified delay.
+ * 
+ * @param delay_ms Delay in milliseconds.
+ */
 void kvs_wait(unsigned int delay_ms) {
   struct timespec delay = delay_to_timespec(delay_ms);
   nanosleep(&delay, NULL);

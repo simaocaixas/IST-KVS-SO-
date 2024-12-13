@@ -23,11 +23,7 @@ run: kvs
 
 clean:
 	rm -f *.o kvs
-	
 
 format:
 	@which clang-format >/dev/null 2>&1 || echo "Please install clang-format to run this command"
 	clang-format -i *.c *.h
-
-job-clean:
-	@cd job && rm -f *.out *.bck && cd ..
