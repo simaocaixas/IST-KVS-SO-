@@ -10,9 +10,9 @@
 #include "kvs.h"
 #include "constants.h"
 
-#define WRLOCK_HASH_LOOP(keys, size, kvs_table, hash) \
+#define WRLOCK_HASH_LOOP(sorted_keys, size, kvs_table, hash) \
     for (size_t i = 0; i < (size); i++) { \
-        int index = (hash)((keys)[i]); \
+        int index = (hash)((sorted_keys)[i]); \
         if (pthread_rwlock_wrlock(&(kvs_table)->hash_lock[index]) != 0) { \
             fprintf(stderr, "Failed to lock write!\n"); \
         } \
@@ -123,8 +123,6 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE], char values[][MAX_
     return 1;
   }
 
-  // Sort Keys
-  qsort(keys, num_pairs, MAX_STRING_SIZE, compare_keys); 
 
   char *sorted_keys[num_pairs];  
   int hashes_seen[num_pairs];
@@ -141,15 +139,19 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE], char values[][MAX_
     if (!check_element(hashes_seen, num_pairs, hash_index)) {
         hashes_seen[size] = hash_index;
         sorted_keys[size] = keys[i];
-        size++; 
+        size++;       
     }
   }
+
+  // Sort Keys 
+  qsort(sorted_keys, size, sizeof(char *), compare_keys); 
 
   // Lock selected hash keys of kvs_table for writing
   WRLOCK_HASH_LOOP(sorted_keys, size, kvs_table, hash);
 
   // Write each pair in kvs_table
   for (size_t i = 0; i < num_pairs; i++) {
+    printf("Writing pair (%s,%s)\n", keys[i], values[i]);
     if (write_pair(kvs_table, keys[i], values[i]) != 0) {
       fprintf(stderr, "Failed to write keypair (%s,%s)\n", keys[i], values[i]);
     }
@@ -198,6 +200,7 @@ int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
   }
 
   for (size_t i = 0; i < num_pairs; i++) {
+    printf("Reading key %s\n", keys[i]);
     char* result = read_pair(kvs_table, keys[i]);
     char line[MAX_STRING_SIZE];
 
@@ -233,9 +236,6 @@ int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
     return 1;
   }
 
-  // Sort Keys
-  qsort(keys, num_pairs, MAX_STRING_SIZE, compare_keys); 
-
   char *sorted_keys[num_pairs]; 
   int hashes_seen[num_pairs];
   size_t size = 0;
@@ -255,6 +255,9 @@ int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
     }
   }
 
+  
+  // Sort Keys
+  qsort(sorted_keys, size, sizeof(char *), compare_keys); 
   // Lock selected hash keys of kvs_table for writing
   WRLOCK_HASH_LOOP(sorted_keys, size, kvs_table, hash);
 
@@ -262,6 +265,7 @@ int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
   char line[MAX_STRING_SIZE];
 
   for (size_t i = 0; i < num_pairs; i++) {
+    printf("Deleting key %s\n", keys[i]);
     if (delete_pair(kvs_table, keys[i]) != 0) {
       if (!aux) {
         // Write initial "["
