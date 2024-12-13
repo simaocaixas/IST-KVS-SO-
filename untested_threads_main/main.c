@@ -134,7 +134,6 @@ int parse_file(int fd_in,int fd_out,const char *dir_name,char* file_name,int tot
               }
           }
           pthread_mutex_unlock(&backup_lock);
-    
           char line[MAX_STRING_SIZE];
           char path[MAX_STRING_SIZE];
 
