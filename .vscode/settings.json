@@ -1,6 +1,9 @@
 {
     "files.associations": {
         "constants.h": "c",
-        "stdlib.h": "c"
+        "stdlib.h": "c",
+        "api.h": "c",
+        "fcntl.h": "c",
+        "pthread.h": "c"
     }
 }
