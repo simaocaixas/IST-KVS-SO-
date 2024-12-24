@@ -11,20 +11,12 @@
 #include "src/common/constants.h"
 #include "src/common/io.h"
 
-typedef struct {
-  pthread_t register_threads[MAX_SESSION_COUNT];
-  char* client_id[MAX_SESSION_COUNT];
-} Session;
 
 int main(int argc, char* argv[]) {
   if (argc < 3) {
     fprintf(stderr, "Usage: %s <client_unique_id> <register_pipe_path>\n", argv[0]);
     return 1;
   }
-
-  Session sessions = {NULL, NULL};
-  Session* sessions_ptr = &sessions;
-  sessions_threads_init(sessions_ptr);
 
   /*
     sem_t sem;
@@ -115,15 +107,4 @@ int main(int argc, char* argv[]) {
         break;
     }
   }
-}
-
-void sessions_threads_init(Session* s) {
-
-  /*
-  for(int i = 0; i < MAX_SESSION_COUNT; i++) {
-    pthread_create(s->register_threads[i], NULL, run_client, )
-
-  }
-  */
-  
 }

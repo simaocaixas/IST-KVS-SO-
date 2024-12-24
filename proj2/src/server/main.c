@@ -8,7 +8,8 @@
 #include <sys/wait.h>
 #include <stdio.h>
 
-#include "constants.h"
+#include "src/server/constants.h"
+#include "src/common/constants.h"
 #include "parser.h"
 #include "operations.h"
 #include "io.h"
@@ -19,6 +20,14 @@ struct SharedData {
   char* dir_name;
   pthread_mutex_t directory_mutex;
 };
+
+typedef struct {
+
+  int client_req_fd;
+  int client_resp_fd; 
+  int client_notif_fd;
+  
+} Clients_struct;
 
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t n_current_backups_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -242,7 +251,8 @@ static void dispatch_threads(DIR* dir) {
   }
 
   struct SharedData thread_data = {dir, jobs_directory, PTHREAD_MUTEX_INITIALIZER};
-
+  
+  Clients_struct clients[MAX_SESSION_COUNT] = {NULL, NULL, NULL};
 
   for (size_t i = 0; i < max_threads; i++) {
     if (pthread_create(&threads[i], NULL, get_file, (void*)&thread_data) != 0) {
@@ -253,12 +263,48 @@ static void dispatch_threads(DIR* dir) {
     }
   }
 
-  // ler do FIFO de registo
-  int read_fifo = open(fifo_server, O_RDONLY);
-  if(read_fifo == -1) {
-    fprintf(stderr, "Failed to open FIFO\n");
-    return;
+  if(unlink(fifo_server) != 0) {
+    write_str(STDERR_FILENO, "Failed to unlink FIFO\n");
+    return 1;
   }
+
+  if(mkfifo(fifo_server, 0640) != 0) {
+    write_str(STDERR_FILENO, "Failed to create FIFO\n");
+    unlink(fifo_server);
+    return 1;
+  }
+
+  int fifo_fd_read = open(fifo_server, O_RDONLY);
+  if(fifo_fd_read == -1) {
+    write_str(STDERR_FILENO, "Failed to open FIFO\n");
+    return 1;
+  }
+
+  // Abrir para escrita para mais clientes
+
+  // LER A MENSAGEM DE CONENCT
+
+  char buffer[MAX_READ_SIZE];
+  
+  // Loop para mais clientes
+  if(read(fifo_fd_read, buffer, MAX_READ_SIZE) == -1) { // 1|<PipeCliente(pedidos)>|<PipeCliente(respostas)>|<PipeCliente(notificacoes)>
+    write_str(STDERR_FILENO, "Failed to read from FIFO\n");
+    return 1;
+  }
+  close(fifo_fd_read);
+
+  
+  char* saveptr;
+  char* token = strtok_r(buffer, "|", &saveptr);
+  char* token1 = strtok_r(NULL, "|", &saveptr);
+  char* token2 = strtok_r(NULL, "|", &saveptr);
+  char* token3 = strtok_r(NULL, "|", &saveptr);
+  
+  clients[0].client_resp_fd = open(token2, O_WRONLY);
+  clients[0].client_notif_fd = open(token3, O_WRONLY);
+  clients[0].client_req_fd = open(token1, O_RDONLY);
+  
+  write(clients[0].client_resp_fd, "1|0", 3);  //lidar com erros se nece
 
   for (unsigned int i = 0; i < max_threads; i++) {
     if (pthread_join(threads[i], NULL) != 0) {
@@ -275,7 +321,6 @@ static void dispatch_threads(DIR* dir) {
 
   free(threads);
 }
-
 
 int main(int argc, char** argv) {
   if (argc < 5) {
@@ -315,29 +360,6 @@ int main(int argc, char** argv) {
 		write_str(STDERR_FILENO, "Invalid number of threads\n");
 		return 0;
 	}
-
-  if(unlink(fifo_server) != 0) {
-    write_str(STDERR_FILENO, "Failed to unlink FIFO\n");
-    return 1;
-  }
-
-  if(mkfifo(fifo_server, 0640) != 0) {
-    write_str(STDERR_FILENO, "Failed to create FIFO\n");
-    unlink(fifo_server);
-    return 1;
-  }
-
-  int fifo_fd_read = open(fifo_server, O_RDONLY);
-  if(fifo_fd_read == -1) {
-    write_str(STDERR_FILENO, "Failed to open FIFO\n");
-    return 1;
-  }
-
-  int fifo_fd_write = open(fifo_server, O_WRONLY);
-  if(fifo_fd_write == -1) {
-    write_str(STDERR_FILENO, "Failed to open FIFO\n");
-    return 1;
-  }
 
   if (kvs_init()) {
     write_str(STDERR_FILENO, "Failed to initialize KVS\n");
