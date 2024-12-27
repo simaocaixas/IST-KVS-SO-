@@ -7,6 +7,8 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <stdio.h>
+#include <sys/stat.h>
+#include <errno.h>
 
 #include "src/server/constants.h"
 #include "src/common/constants.h"
@@ -22,11 +24,9 @@ struct SharedData {
 };
 
 typedef struct {
-
   int client_req_fd;
   int client_resp_fd; 
   int client_notif_fd;
-  
 } Clients_struct;
 
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
@@ -37,6 +37,7 @@ size_t max_backups;            // Maximum allowed simultaneous backups
 size_t max_threads;            // Maximum allowed simultaneous threads
 char* jobs_directory = NULL;
 char* fifo_server;
+char server_pipe_path[256] = "/tmp/server";
 
 int filter_job_files(const struct dirent* entry) {
     const char* dot = strrchr(entry->d_name, '.');
@@ -242,39 +243,41 @@ static void* get_file(void* arguments) {
 }
 
 
-static void dispatch_threads(DIR* dir) {
+static int dispatch_threads(DIR* dir) {
   pthread_t* threads = malloc(max_threads * sizeof(pthread_t));
 
   if (threads == NULL) {
     fprintf(stderr, "Failed to allocate memory for threads\n");
-    return;
+    return 1;
   }
 
   struct SharedData thread_data = {dir, jobs_directory, PTHREAD_MUTEX_INITIALIZER};
   
-  Clients_struct clients[MAX_SESSION_COUNT] = {NULL, NULL, NULL};
+  Clients_struct clients[MAX_SESSION_COUNT] = {{0}}; 
 
   for (size_t i = 0; i < max_threads; i++) {
     if (pthread_create(&threads[i], NULL, get_file, (void*)&thread_data) != 0) {
       fprintf(stderr, "Failed to create thread %zu\n", i);
       pthread_mutex_destroy(&thread_data.directory_mutex);
       free(threads);
-      return;
+      return 1;
     }
   }
 
-  if(unlink(fifo_server) != 0) {
-    write_str(STDERR_FILENO, "Failed to unlink FIFO\n");
+  strncat(server_pipe_path, fifo_server, strlen(fifo_server) * sizeof(char));
+  
+  if(unlink(server_pipe_path) != 0 && errno != ENOENT) {
+    fprintf(stderr, "Failed to unlink server FIFO!\n");
     return 1;
   }
 
-  if(mkfifo(fifo_server, 0640) != 0) {
+  if(mkfifo(server_pipe_path, 0640) != 0) {
     write_str(STDERR_FILENO, "Failed to create FIFO\n");
-    unlink(fifo_server);
+    unlink(server_pipe_path);
     return 1;
   }
 
-  int fifo_fd_read = open(fifo_server, O_RDONLY);
+  int fifo_fd_read = open(server_pipe_path, O_RDONLY);
   if(fifo_fd_read == -1) {
     write_str(STDERR_FILENO, "Failed to open FIFO\n");
     return 1;
@@ -282,7 +285,7 @@ static void dispatch_threads(DIR* dir) {
 
   // Abrir para escrita para mais clientes
 
-  // LER A MENSAGEM DE CONENCT
+  // LER A MENSAGEM DE CONNECT
 
   char buffer[MAX_READ_SIZE];
   
@@ -291,11 +294,17 @@ static void dispatch_threads(DIR* dir) {
     write_str(STDERR_FILENO, "Failed to read from FIFO\n");
     return 1;
   }
-  close(fifo_fd_read);
 
+  close(fifo_fd_read);
   
   char* saveptr;
   char* token = strtok_r(buffer, "|", &saveptr);
+
+  if (token == NULL || strcmp(token, "1") != 0) {
+    write_str(STDERR_FILENO, "Invalid message\n");
+    return 1;
+  }
+
   char* token1 = strtok_r(NULL, "|", &saveptr);
   char* token2 = strtok_r(NULL, "|", &saveptr);
   char* token3 = strtok_r(NULL, "|", &saveptr);
@@ -303,15 +312,15 @@ static void dispatch_threads(DIR* dir) {
   clients[0].client_resp_fd = open(token2, O_WRONLY);
   clients[0].client_notif_fd = open(token3, O_WRONLY);
   clients[0].client_req_fd = open(token1, O_RDONLY);
-  
+ 
   write(clients[0].client_resp_fd, "1|0", 3);  //lidar com erros se nece
-
+  
   for (unsigned int i = 0; i < max_threads; i++) {
     if (pthread_join(threads[i], NULL) != 0) {
       fprintf(stderr, "Failed to join thread %u\n", i);
       pthread_mutex_destroy(&thread_data.directory_mutex);
       free(threads);
-      return;
+      return 1;
     }
   }
 
@@ -320,6 +329,7 @@ static void dispatch_threads(DIR* dir) {
   }
 
   free(threads);
+  return 0;
 }
 
 int main(int argc, char** argv) {

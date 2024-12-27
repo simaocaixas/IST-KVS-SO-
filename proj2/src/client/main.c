@@ -17,15 +17,16 @@ int main(int argc, char* argv[]) {
     fprintf(stderr, "Usage: %s <client_unique_id> <register_pipe_path>\n", argv[0]);
     return 1;
   }
-
   /*
     sem_t sem;
     sem_init(&sem, 0, MAX_SESSION_COUNT);
   */
 
-  char req_pipe_path[256] = "/tmp/req/";
-  char resp_pipe_path[256] = "/tmp/resp/";
-  char notif_pipe_path[256] = "/tmp/notif/";
+  char req_pipe_path[256] = "/tmp/req";
+  char resp_pipe_path[256] = "/tmp/resp";
+  char notif_pipe_path[256] = "/tmp/notif";
+  char server_pipe_path[256] = "/tmp/server";
+
 
   char keys[MAX_NUMBER_SUB][MAX_STRING_SIZE] = {0};
   unsigned int delay_ms;
@@ -34,12 +35,11 @@ int main(int argc, char* argv[]) {
   strncat(req_pipe_path, argv[1], strlen(argv[1]) * sizeof(char));
   strncat(resp_pipe_path, argv[1], strlen(argv[1]) * sizeof(char));
   strncat(notif_pipe_path, argv[1], strlen(argv[1]) * sizeof(char));
-
-  int* notif_pipe_fd;
+  strncat(server_pipe_path, argv[2], strlen(argv[2]) * sizeof(char));
   
   // sem_wait(&sem);
   
-  if(kvs_connect(req_pipe_path, resp_pipe_path, argv[2], notif_pipe_path) != 0) {
+  if(kvs_connect(req_pipe_path, resp_pipe_path, server_pipe_path, notif_pipe_path) != 0) {
     fprintf(stderr, "Failed to connect to the server\n");
     return 1;
   }

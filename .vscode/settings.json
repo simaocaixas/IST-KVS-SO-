@@ -4,6 +4,9 @@
         "stdlib.h": "c",
         "api.h": "c",
         "fcntl.h": "c",
-        "pthread.h": "c"
+        "pthread.h": "c",
+        "parser.h": "c",
+        "semaphore.h": "c",
+        "stdio.h": "c"
     }
 }

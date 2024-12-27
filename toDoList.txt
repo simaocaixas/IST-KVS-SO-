@@ -1,0 +1,9 @@
+Servidor:
+
+    -> ligar fifos do cliente no sevidor
+
+
+
+
+
+Cliente:
