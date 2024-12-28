@@ -3,7 +3,6 @@
 #include <ctype.h>
 
 #include <stdlib.h>
-
 // Hash function based on key initial.
 // @param key Lowercase alphabetical string.
 // @return hash.
@@ -49,6 +48,11 @@ int write_pair(HashTable *ht, const char *key, const char *value) {
     keyNode = malloc(sizeof(KeyNode));
     keyNode->key = strdup(key); // Allocate memory for the key
     keyNode->value = strdup(value); // Allocate memory for the value
+    
+    for(int i = 0; i < S; i++) {
+        keyNode->notifications[i] = -3;
+    }
+
     keyNode->next = ht->table[index]; // Link to existing nodes
     ht->table[index] = keyNode; // Place new key node at the start of the list
     return 0;

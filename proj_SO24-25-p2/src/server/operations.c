@@ -61,73 +61,6 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE],
   return 0;
 }
 
-int kvs_subscription(const char* key, int notif_fd) {
-  if (kvs_table == NULL) {
-    fprintf(stderr, "KVS state must be initialized\n");
-    return 1;
-  }
-
-  // ver se a chave existe na hash com  a read-pair
-  char* value = read_pair(kvs_table, key);
-  if (value == NULL) {
-    return 1;
-  }
-  
-  int hsh = hash(key); 
-  KeyNode* keyNode = kvs_table->table[hsh];
-  KeyNode* previousNode = NULL;
-  while (keyNode != NULL) {
-        if (strcmp(keyNode->key, key) == 0) {
-            // adicionar o fd a lista de notificacoes 
-            for(int i = 0; i < S; i++) {
-              if (keyNode->notifications[i] == -3) {
-                keyNode->notifications[i] = notif_fd;
-                return 0;
-              }
-            }
-            fprintf(stderr, "No avaiable slot for notifications\n");
-            return 1;
-          }  
-      previousNode = keyNode;
-      keyNode = previousNode->next; // Move to the next node
-    }
-
-    fprintf(stderr, "Key not found\n");
-    return 1;
-  // colocar o fd na lista da chave (se a chave existir)
-}
-
-int kvs_unsubscription(const char* key, int notif_fd) {
-  if (kvs_table == NULL) {
-    fprintf(stderr, "KVS state must be initialized\n");
-    return 1;
-  }
-
-  // ver se a chave existe na hash com  a read-pair
-  char* value = read_pair(kvs_table, key);
-  if (value == NULL) {
-    return 1;
-  }
-  
-  int hsh = hash(key); 
-  KeyNode* keyNode = kvs_table->table[hsh];
-  KeyNode* previousNode = NULL;
-  while (keyNode != NULL) {
-        if (strcmp(keyNode->key, key) == 0) {
-            // adicionar o fd a lista de notificacoes 
-            for(int i = 0; i < S; i++) {
-              if (keyNode->notifications[i] == notif_fd) {
-                keyNode->notifications[i] = -3;
-                return 0;
-              }
-            }
-          }  
-      previousNode = keyNode;
-      keyNode = previousNode->next; // Move to the next node
-    }
-  // colocar o fd na lista da chave (se a chave existir)
-}
-
 int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
   if (kvs_table == NULL) {
     fprintf(stderr, "KVS state must be initialized\n");
@@ -248,5 +181,3 @@ void kvs_wait(unsigned int delay_ms) {
   struct timespec delay = delay_to_timespec(delay_ms);
   nanosleep(&delay, NULL);
 }
-
-

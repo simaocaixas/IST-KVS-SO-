@@ -12,6 +12,7 @@
 
 #include "src/server/constants.h"
 #include "src/common/constants.h"
+#include "src/common/protocol.h"
 #include "parser.h"
 #include "operations.h"
 #include "io.h"
@@ -25,9 +26,15 @@ struct SharedData {
 
 typedef struct {
   int client_req_fd;
-  int client_resp_fd; 
+  int client_resp_fd; // JÁ VOLTEI, QUANDO VOLTARES LIGA ass:António :> 
   int client_notif_fd;
-} Clients_struct;
+} Client;
+
+struct PipeData {
+  Client client;
+};
+
+// we have a list of clients: [client1_req_fd, client1_resp_fd, client1_notif_fd], [client2_req_fd, client2_resp_fd, client2_notif_fd], ...]
 
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t n_current_backups_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -175,6 +182,10 @@ static int run_job(int in_fd, int out_fd, char* filename) {
   }
 }
 
+static void* manage_client(void* argments) {
+
+} 
+
 //frees arguments
 static void* get_file(void* arguments) {
   struct SharedData* thread_data = (struct SharedData*) arguments;
@@ -242,6 +253,87 @@ static void* get_file(void* arguments) {
   pthread_exit(NULL);
 }
 
+static void* manage_clients(void* arguments) {
+  struct PipeData* pipe_data = (struct PipeData*) arguments;
+  Client client = {-1,-1,-1};
+  client = pipe_data->client;
+  int client_req_fd = client.client_req_fd; // we (server) will write to this
+  int client_resp_fd = client.client_resp_fd; // we will read from this
+  int client_notif_fd = client.client_notif_fd; 
+
+
+  while (1) {
+    char buffer[MAX_READ_SIZE];
+    ssize_t bytes_read;
+    bytes_read = read(client_req_fd,buffer,MAX_READ_SIZE); 
+    
+    if (bytes_read > 0) {
+        
+      int res;
+      char* saveptr, answer;
+      char* token = strtok_r(buffer, "|", &saveptr);
+
+      switch (atoi(token)) {
+        
+        case OP_CODE_DISCONNECT:
+          // disconnect>
+          /*
+           -> USAR FLAG PARA ANSWER CASO TENHA HAVIDO ERROS 
+           -> eliminar subscrições
+           -> apagar o cliente da estutura de dados
+           -> fechar os pipes 
+           -> adaptar resposta servidor
+          -> enviar a mensagem
+          */
+
+          //TIRAR SUBSCRICOES DO CLIENTE NAS CHAVES
+          snprintf(answer, MAX_WRITE_SIZE, "%d|0", OP_CODE_DISCONNECT);
+          write(client_resp_fd, answer, 3);
+          close(client_req_fd); close(client_resp_fd); close(client_notif_fd);
+
+          break;
+          
+        case OP_CODE_SUBSCRIBE:
+          
+          // (char) OP_CODE=3 | char[41] key
+
+           /*
+            -> adquirir chave
+            -> aceder à chave
+            -> adicionar cliente estrutura dados 
+            -> verificar se chave existe e retornar
+            -> enviar a mensagem
+          */
+          // subscribe
+
+          // (char) OP_CODE=3 | (char) result
+          const char* key = strtok_r(NULL, "|", &saveptr);
+          res = kvs_subscribe(key, client_notif_fd);
+
+          if(res == 0) {
+            snprintf(answer, MAX_WRITE_SIZE, "%d|1", OP_CODE_SUBSCRIBE);
+            write(client_resp_fd, answer, 3);
+          } else {
+            snprintf(answer, MAX_WRITE_SIZE, "%d|0", OP_CODE_SUBSCRIBE);
+            write(client_resp_fd, answer, 3);
+          }
+
+          break;
+        case OP_CODE_UNSUBSCRIBE:
+          // unsubscribe
+          break;
+
+        default:
+          write_str(STDERR_FILENO, "Invalid message, opcode not recognized!\n");
+          break;
+      }
+    }
+
+  }
+  return 0;
+}
+
+
 
 static int dispatch_threads(DIR* dir) {
   pthread_t* threads = malloc(max_threads * sizeof(pthread_t));
@@ -253,7 +345,7 @@ static int dispatch_threads(DIR* dir) {
 
   struct SharedData thread_data = {dir, jobs_directory, PTHREAD_MUTEX_INITIALIZER};
   
-  Clients_struct clients[MAX_SESSION_COUNT] = {{0}}; 
+  Client clients[MAX_SESSION_COUNT] = {{0}}; 
 
   for (size_t i = 0; i < max_threads; i++) {
     if (pthread_create(&threads[i], NULL, get_file, (void*)&thread_data) != 0) {
@@ -313,8 +405,17 @@ static int dispatch_threads(DIR* dir) {
   clients[0].client_notif_fd = open(token3, O_WRONLY);
   clients[0].client_req_fd = open(token1, O_RDONLY);
  
-  write(clients[0].client_resp_fd, "1|0", 3);  //lidar com erros se nece
+  char* answer;
+  snprintf(answer, MAX_WRITE_SIZE, "%d|0", OP_CODE_CONNECT);
+  write(clients[0].client_resp_fd, answer, 3);  //lidar com erros se necessário
   
+  // Agora vamos colocar as threads gestoras a funcionar! (futuramente vamos ter de fazer um loop para mais clientes)
+
+  
+
+
+
+
   for (unsigned int i = 0; i < max_threads; i++) {
     if (pthread_join(threads[i], NULL) != 0) {
       fprintf(stderr, "Failed to join thread %u\n", i);

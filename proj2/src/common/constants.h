@@ -5,4 +5,8 @@
 #define MAX_STRING_SIZE 40
 #define MAX_NUMBER_SUB 10
 #define MAX_CONNECT_STRING 124
-
+#define S 1
+#define CONNECT "connect"
+#define DISCONNECT "disconnect"
+#define SUBSCRIBE "subscribe"
+#define UNSUBSCRIBE "unsubscribe"
