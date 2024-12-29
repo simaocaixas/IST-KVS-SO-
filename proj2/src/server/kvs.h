@@ -5,13 +5,20 @@
 
 #include <stddef.h>
 #include <pthread.h>
-#include "../common/constants.h" // Adjust the path as needed
+#include "common/constants.h"
+
+#include "../common/constants.h" // <- Adjust the path as needed
 typedef struct KeyNode {
     char *key;
     char *value;
     int notifications[S];
     struct KeyNode *next;
 } KeyNode;
+
+typedef struct KeysList {
+    char *key;
+    KeysList *next;
+} KeysList;
 
 typedef struct HashTable {
     KeyNode *table[TABLE_SIZE];

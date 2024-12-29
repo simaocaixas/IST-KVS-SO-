@@ -78,12 +78,16 @@ int kvs_subscription(const char* key, int notif_fd) {
   KeyNode* previousNode = NULL;
   while (keyNode != NULL) {
         if (strcmp(keyNode->key, key) == 0) {
-            // adicionar o fd a lista de notificacoes 
+            // adicionar o fd a lista de notificacoes
+            for(int i = 0; i < S; i++) {
+              if (keyNode->notifications[i] == notif_fd) return 1;
+            }
+
             for(int i = 0; i < S; i++) {
               if (keyNode->notifications[i] == -3) {
                 keyNode->notifications[i] = notif_fd;
                 return 0;
-              }
+              }    
             }
             fprintf(stderr, "No avaiable slot for notifications\n");
             return 1;

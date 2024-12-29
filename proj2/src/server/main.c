@@ -17,6 +17,7 @@
 #include "operations.h"
 #include "io.h"
 #include "pthread.h"
+#include "kvs.h"
 
 struct SharedData {
   DIR* dir;
@@ -26,13 +27,65 @@ struct SharedData {
 
 typedef struct {
   int client_req_fd;
-  int client_resp_fd; // JÁ VOLTEI, QUANDO VOLTARES LIGA ass:António :> 
+  int client_resp_fd; 
   int client_notif_fd;
+  KeysList *subscriptions;
+
 } Client;
 
 struct PipeData {
   Client client;
 };
+
+
+int key_insert(KeysList **head, const char* key) {
+  KeyNode *new_node = (KeyNode*)malloc(sizeof(KeyNode));
+  if (new_node == NULL) {
+    perror("Failed to create key node!");
+    return 1;
+  } 
+
+  new_node->key = strdup(key);
+  if(new_node->key == NULL) {
+    free(new_node);
+    return 1;
+  }
+
+  new_node->next = NULL;
+
+  if(*head == NULL) {
+    *head = new_node;
+  } else {
+    new_node->next = *head; //inserção a esquerda
+  }
+
+  return 0;
+}
+
+int key_delete(KeysList **head, const char* key) {
+  if (head == NULL || key == NULL) return 1;
+
+  KeysList *current = *head, *previous = NULL;
+  while(current != NULL) {
+    if(strcmp(current->key, key) == 0) {
+      if (previous == NULL) {
+        *head = current->next;
+        free(current->key);
+        free(current);
+        return 0;
+      } else {
+        previous->next = current->next;
+        free(current->key);
+        free(current);
+        return 0; 
+      }
+    }
+    previous = current;
+    current = current->next;
+  }
+
+  return 1;
+}
 
 // we have a list of clients: [client1_req_fd, client1_resp_fd, client1_notif_fd], [client2_req_fd, client2_resp_fd, client2_notif_fd], ...]
 
@@ -255,7 +308,7 @@ static void* get_file(void* arguments) {
 
 static void* manage_clients(void* arguments) {
   struct PipeData* pipe_data = (struct PipeData*) arguments;
-  Client client = {-1,-1,-1};
+  Client client = {-1,-1,-1, NULL};
   client = pipe_data->client;
   int client_req_fd = client.client_req_fd; // we (server) will write to this
   int client_resp_fd = client.client_resp_fd; // we will read from this
@@ -287,6 +340,12 @@ static void* manage_clients(void* arguments) {
           */
 
           //TIRAR SUBSCRICOES DO CLIENTE NAS CHAVES
+          KeysList *current = client.subscriptions;
+          while (current != NULL) {
+            res = kvs_unsubscription(current->key, client.client_notif_fd);
+            key_delete(&client.subscriptions, current->key);
+            current = current->next;
+          }
           snprintf(answer, MAX_WRITE_SIZE, "%d|0", OP_CODE_DISCONNECT);
           write(client_resp_fd, answer, 3);
           close(client_req_fd); close(client_resp_fd); close(client_notif_fd);
@@ -313,6 +372,8 @@ static void* manage_clients(void* arguments) {
           if(res == 0) {
             snprintf(answer, MAX_WRITE_SIZE, "%d|1", OP_CODE_SUBSCRIBE);
             write(client_resp_fd, answer, 3);
+            key_insert
+            
           } else {
             snprintf(answer, MAX_WRITE_SIZE, "%d|0", OP_CODE_SUBSCRIBE);
             write(client_resp_fd, answer, 3);
@@ -501,3 +562,7 @@ int main(int argc, char** argv) {
 
   return 0;
 }
+
+
+
+

@@ -21,6 +21,8 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE], char values[][MAX_
 
 int kvs_subscribe(char key, int fd);
 
+int kvs_unsubscription(const char* key, int notif_fd);
+
 /// Reads values from the KVS.
 /// @param num_pairs Number of pairs to read.
 /// @param keys Array of keys' strings.
