@@ -19,7 +19,7 @@ int kvs_terminate();
 /// @return 0 if the pairs were written successfully, 1 otherwise.
 int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE], char values[][MAX_STRING_SIZE]);
 
-int kvs_subscribe(char key, int fd);
+int kvs_subscription(const char* key, int notif_fd);
 
 int kvs_unsubscription(const char* key, int notif_fd);
 

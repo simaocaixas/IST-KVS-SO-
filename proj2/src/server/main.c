@@ -29,7 +29,7 @@ typedef struct {
   int client_req_fd;
   int client_resp_fd; 
   int client_notif_fd;
-  KeysList *subscriptions;
+  KeySubNode *subscriptions;
 
 } Client;
 
@@ -38,8 +38,8 @@ struct PipeData {
 };
 
 
-int key_insert(KeysList **head, const char* key) {
-  KeyNode *new_node = (KeyNode*)malloc(sizeof(KeyNode));
+int key_insert(KeySubNode **head, const char* key) {
+  KeySubNode *new_node = (KeySubNode*)malloc(sizeof(KeySubNode));
   if (new_node == NULL) {
     perror("Failed to create key node!");
     return 1;
@@ -62,29 +62,29 @@ int key_insert(KeysList **head, const char* key) {
   return 0;
 }
 
-int key_delete(KeysList **head, const char* key) {
+int key_delete(KeySubNode **head, const char* key) {
   if (head == NULL || key == NULL) return 1;
 
-  KeysList *current = *head, *previous = NULL;
+  KeySubNode *current = *head, *previous = NULL;
   while(current != NULL) {
     if(strcmp(current->key, key) == 0) {
       if (previous == NULL) {
         *head = current->next;
         free(current->key);
         free(current);
-        return 0;
+        return 1;
       } else {
         previous->next = current->next;
         free(current->key);
         free(current);
-        return 0; 
+        return 1; 
       }
     }
     previous = current;
     current = current->next;
   }
 
-  return 1;
+  return 0;
 }
 
 // we have a list of clients: [client1_req_fd, client1_resp_fd, client1_notif_fd], [client2_req_fd, client2_resp_fd, client2_notif_fd], ...]
@@ -234,10 +234,12 @@ static int run_job(int in_fd, int out_fd, char* filename) {
     }
   }
 }
+/*
+  static void* manage_client(void* arguments) {
 
-static void* manage_client(void* argments) {
-
-} 
+  }
+*/
+ 
 
 //frees arguments
 static void* get_file(void* arguments) {
@@ -318,13 +320,14 @@ static void* manage_clients(void* arguments) {
   while (1) {
     char buffer[MAX_READ_SIZE];
     ssize_t bytes_read;
-    bytes_read = read(client_req_fd,buffer,MAX_READ_SIZE); 
+    bytes_read = read(client_req_fd,buffer,MAX_READ_SIZE);
     
     if (bytes_read > 0) {
         
       int res;
-      char* saveptr, answer;
+      char *saveptr = NULL, answer[MAX_WRITE_SIZE];
       char* token = strtok_r(buffer, "|", &saveptr);
+      const char* key = NULL;
 
       switch (atoi(token)) {
         
@@ -340,16 +343,35 @@ static void* manage_clients(void* arguments) {
           */
 
           //TIRAR SUBSCRICOES DO CLIENTE NAS CHAVES
-          KeysList *current = client.subscriptions;
+          int cleanup_success = 1;
+          KeySubNode *current = client.subscriptions;
+          
           while (current != NULL) {
-            res = kvs_unsubscription(current->key, client.client_notif_fd);
-            key_delete(&client.subscriptions, current->key);
+            if (kvs_unsubscription(current->key, client.client_notif_fd) != 0) {
+              fprintf(stderr, "Failed to unsubscribe key: %s\n", current->key);
+              cleanup_success = 0;
+            }
+
+            if(key_delete(&client.subscriptions, current->key) != 0) {
+              fprintf(stderr, "Failed to delete subscription from key: %s\n", current->key);
+              cleanup_success = 0;
+            }
             current = current->next;
           }
-          snprintf(answer, MAX_WRITE_SIZE, "%d|0", OP_CODE_DISCONNECT);
-          write(client_resp_fd, answer, 3);
+
           close(client_req_fd); close(client_resp_fd); close(client_notif_fd);
 
+          if (cleanup_success) {
+              snprintf(answer, MAX_WRITE_SIZE, "%d|0", OP_CODE_DISCONNECT);
+          } else {
+              snprintf(answer, MAX_WRITE_SIZE, "%d|1", OP_CODE_DISCONNECT);
+          }
+
+          if(write(client_resp_fd, answer, strlen(answer)) == -1) {
+            fprintf(stderr, "Failed to write answer to fd : %s\n", DISCONNECT);
+            return 0;
+          }
+          
           break;
           
         case OP_CODE_SUBSCRIBE:
@@ -366,22 +388,48 @@ static void* manage_clients(void* arguments) {
           // subscribe
 
           // (char) OP_CODE=3 | (char) result
-          const char* key = strtok_r(NULL, "|", &saveptr);
-          res = kvs_subscribe(key, client_notif_fd);
+          key = strtok_r(NULL, "|", &saveptr);
+          res = kvs_subscription(key, client_notif_fd);
 
           if(res == 0) {
-            snprintf(answer, MAX_WRITE_SIZE, "%d|1", OP_CODE_SUBSCRIBE);
-            write(client_resp_fd, answer, 3);
-            key_insert
             
+            if(key_insert(&client.subscriptions, key) != 0) {
+              fprintf(stderr, "Failed to insert subscription key!\n");
+              return 0;
+            }
+            snprintf(answer, MAX_WRITE_SIZE, "%d|1", OP_CODE_SUBSCRIBE);
+          
           } else {
             snprintf(answer, MAX_WRITE_SIZE, "%d|0", OP_CODE_SUBSCRIBE);
-            write(client_resp_fd, answer, 3);
+          }
+
+          if(write(client_resp_fd, answer, strlen(answer)) == -1) {
+            fprintf(stderr, "Failed to write answer to fd : %s\n", SUBSCRIBE);
+            return 0;
           }
 
           break;
         case OP_CODE_UNSUBSCRIBE:
-          // unsubscribe
+
+          key = strtok_r(NULL, "|", &saveptr);
+          res = kvs_unsubscription(key, client_notif_fd);
+
+          if(res == 0) {
+            
+            if(key_insert(&client.subscriptions, key) != 0) {
+              fprintf(stderr, "Failed to insert subscription key!\n");
+              return 0;
+            }
+            snprintf(answer, MAX_WRITE_SIZE, "%d|1", OP_CODE_SUBSCRIBE);
+          
+          } else {
+            snprintf(answer, MAX_WRITE_SIZE, "%d|0", OP_CODE_SUBSCRIBE);
+          }
+
+          if(write(client_resp_fd, answer, strlen(answer)) == -1) {
+            fprintf(stderr, "Failed to write answer to fd : %s\n", UNSUBSCRIBE);
+            return 0;
+          }
           break;
 
         default:
@@ -450,7 +498,7 @@ static int dispatch_threads(DIR* dir) {
 
   close(fifo_fd_read);
   
-  char* saveptr;
+  char* saveptr = NULL;
   char* token = strtok_r(buffer, "|", &saveptr);
 
   if (token == NULL || strcmp(token, "1") != 0) {
@@ -466,9 +514,12 @@ static int dispatch_threads(DIR* dir) {
   clients[0].client_notif_fd = open(token3, O_WRONLY);
   clients[0].client_req_fd = open(token1, O_RDONLY);
  
-  char* answer;
+  char answer[MAX_WRITE_SIZE];
   snprintf(answer, MAX_WRITE_SIZE, "%d|0", OP_CODE_CONNECT);
-  write(clients[0].client_resp_fd, answer, 3);  //lidar com erros se necessário
+  if(write(clients[0].client_resp_fd, answer, strlen(answer)) == -1) {
+    fprintf(stderr, "Failed to write answer to fd: %s\n", CONNECT);
+    return 1;
+  }
   
   // Agora vamos colocar as threads gestoras a funcionar! (futuramente vamos ter de fazer um loop para mais clientes)
 

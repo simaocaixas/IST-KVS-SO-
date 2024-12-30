@@ -96,15 +96,13 @@ int kvs_connect(char const* req_pipe_path, char const* resp_pipe_path, char cons
   }
 
   printf("Waiting for server response\n");
-  char buffer_response[MAX_CONNECT_STRING], charOPCODE;
+  char buffer_response[MAX_CONNECT_STRING], charOPCODE = '0' + OP_CODE_CONNECT;
 
   if(read(_resp_fd, buffer_response, 3) == -1) { // a read operation is for sure atomic because 3 bytes < block size (4096 bytes)
     fprintf(stderr, "Failed to open response FIFO\n");
     close(_resp_fd); close(_req_fd); close(_notif_fd);
     return 1;
-  }  
-
-  snprintf(charOPCODE, "%d", OP_CODE_CONNECT);
+  } 
 
   if (buffer_response[0] == charOPCODE) {
     if (buffer_response[2] == '0') {
@@ -132,7 +130,7 @@ int kvs_connect(char const* req_pipe_path, char const* resp_pipe_path, char cons
 int kvs_disconnect(void) {
 // close pipes and unlink pipe files
   write_to_fd(_req_fd, "2"); // send disconnect message to request pipe
-  char buffer_response[MAX_CONNECT_STRING], charOPCODE;
+  char buffer_response[MAX_CONNECT_STRING], charOPCODE = '0' + OP_CODE_DISCONNECT;
 
   if(read(_resp_fd, buffer_response, 3) == -1) { // a read operation is for sure atomic because 3 bytes < block size (4096 bytes)
     fprintf(stderr, "Failed to open response FIFO\n");
@@ -140,8 +138,6 @@ int kvs_disconnect(void) {
     close(_resp_fd); close(_req_fd); close(_notif_fd);
     return 1;
   }  
-
-  snprintf(charOPCODE, "%d", OP_CODE_DISCONNECT);
 
   if (buffer_response[0] == charOPCODE) {
     if (buffer_response[2] == '0') {
@@ -176,7 +172,7 @@ int kvs_disconnect(void) {
 
 int kvs_subscribe(const char* key) {
   // send subscribe message to request pipe and wait for response in response pipe
-  char buffer_request[MAX_CONNECT_STRING], charOPCODE;
+  char buffer_request[MAX_CONNECT_STRING], charOPCODE = '0' + OP_CODE_SUBSCRIBE;
   snprintf(buffer_request, MAX_CONNECT_STRING, "%d|%s", OP_CODE_SUBSCRIBE, key);
   write_to_fd(_req_fd, buffer_request); // send subscribe message to request pipe
 
@@ -187,14 +183,12 @@ int kvs_subscribe(const char* key) {
     return 1;
   } 
 
-  snprintf(charOPCODE, "%d", OP_CODE_SUBSCRIBE);
-
   if (buffer_response[0] == charOPCODE) {
     if (buffer_response[2] == '1') {
       fprintf(stdout, "Server returned 1 for operation: %s\n", SUBSCRIBE); // Server returned <response-code> for operation: <connect|disconnect|subscribe|unsubscribe>
       
     } else {
-      fprintf(stdout, "Server returned 0 for operation: %s\n" SUBSCRIBE); 
+      fprintf(stdout, "Server returned 0 for operation: %s\n", SUBSCRIBE); 
       fprintf(stderr, "Could not subscribe to key! (Key not Found)\n");
       return 1;
     }
@@ -217,15 +211,13 @@ int kvs_unsubscribe(const char* key) {
     return 1;
   } 
 
-  char buffer_response[MAX_CONNECT_STRING], charOPCODE;
+  char buffer_response[MAX_CONNECT_STRING], charOPCODE = '0' + OP_CODE_UNSUBSCRIBE;
 
   if(read(_resp_fd, buffer_response, 3) == -1) { // a read operation is for sure atomic because 3 bytes < block size (4096 bytes)
     fprintf(stderr, "Failed to open response FIFO\n");
     close(_req_fd); close(_resp_fd); close(_notif_fd);
     return 1;
   }  
-
-  snprintf(charOPCODE, "%d", OP_CODE_UNSUBSCRIBE);
   
   if (buffer_response[0] == charOPCODE) {
     if (buffer_response[2] == '0') {

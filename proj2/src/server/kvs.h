@@ -5,7 +5,7 @@
 
 #include <stddef.h>
 #include <pthread.h>
-#include "common/constants.h"
+#include "src/common/constants.h"
 
 #include "../common/constants.h" // <- Adjust the path as needed
 typedef struct KeyNode {
@@ -15,10 +15,10 @@ typedef struct KeyNode {
     struct KeyNode *next;
 } KeyNode;
 
-typedef struct KeysList {
+typedef struct KeySubNode {
     char *key;
-    KeysList *next;
-} KeysList;
+    struct KeySubNode *next;
+} KeySubNode;
 
 typedef struct HashTable {
     KeyNode *table[TABLE_SIZE];

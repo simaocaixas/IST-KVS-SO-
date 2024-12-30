@@ -80,7 +80,10 @@ int kvs_subscription(const char* key, int notif_fd) {
         if (strcmp(keyNode->key, key) == 0) {
             // adicionar o fd a lista de notificacoes
             for(int i = 0; i < S; i++) {
-              if (keyNode->notifications[i] == notif_fd) return 1;
+              if (keyNode->notifications[i] == notif_fd){
+                fprintf(stderr, "Fd already subscribed!\n");
+                return 1;
+              }
             }
 
             for(int i = 0; i < S; i++) {
@@ -118,7 +121,6 @@ int kvs_unsubscription(const char* key, int notif_fd) {
   KeyNode* previousNode = NULL;
   while (keyNode != NULL) {
         if (strcmp(keyNode->key, key) == 0) {
-            // adicionar o fd a lista de notificacoes 
             for(int i = 0; i < S; i++) {
               if (keyNode->notifications[i] == notif_fd) {
                 keyNode->notifications[i] = -3;
@@ -129,7 +131,8 @@ int kvs_unsubscription(const char* key, int notif_fd) {
       previousNode = keyNode;
       keyNode = previousNode->next; // Move to the next node
     }
-  // colocar o fd na lista da chave (se a chave existir)
+  fprintf(stderr, "Key not found\n");
+  return 1;
 }
 
 int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
