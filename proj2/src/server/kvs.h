@@ -11,7 +11,7 @@
 typedef struct KeyNode {
     char *key;
     char *value;
-    int notifications[S];
+    int notifications[MAX_SESSION_COUNT];
     struct KeyNode *next;
 } KeyNode;
 

@@ -1,6 +1,8 @@
 #include "kvs.h"
 #include "string.h"
 #include <ctype.h>
+#include <stdio.h>
+#include <unistd.h>
 
 #include <stdlib.h>
 // Hash function based on key initial.
@@ -27,6 +29,24 @@ struct HashTable* create_hash_table() {
 	return ht;
 }
 
+int notify_fds(int notifications[MAX_SESSION_COUNT], const char* key, const char* value, int bit){ 
+
+    char buffer[MAX_STRING_SIZE];
+    if (bit == 0) {
+        snprintf(buffer, MAX_STRING_SIZE, "(%s,%s)", key, value);    
+    } else {
+        snprintf(buffer, MAX_STRING_SIZE, "(%s,DELETED)", key);    
+    }
+    
+    for (int i = 0; i < MAX_SESSION_COUNT; i++) {
+        if (notifications[i] > 0) {
+            if(write(notifications[i], buffer, strlen(buffer)) == -1) return 1;        
+        }
+    }
+    
+    return 0;
+}
+
 int write_pair(HashTable *ht, const char *key, const char *value) {
     int index = hash(key);
 
@@ -39,6 +59,7 @@ int write_pair(HashTable *ht, const char *key, const char *value) {
             // overwrite value
             free(keyNode->value);
             keyNode->value = strdup(value);
+            notify_fds(keyNode->notifications, key, value, 0);
             return 0;
         }
         previousNode = keyNode;
@@ -49,7 +70,7 @@ int write_pair(HashTable *ht, const char *key, const char *value) {
     keyNode->key = strdup(key); // Allocate memory for the key
     keyNode->value = strdup(value); // Allocate memory for the value
     
-    for(int i = 0; i < S; i++) {
+    for(int i = 0; i < MAX_SESSION_COUNT; i++) {
         keyNode->notifications[i] = -3;
     }
 
@@ -95,6 +116,7 @@ int delete_pair(HashTable *ht, const char *key) {
                 prevNode->next = keyNode->next; // Link the previous node to the next node
             }
             // Free the memory allocated for the key and value
+            notify_fds(keyNode->notifications, key, NULL, 1);
             free(keyNode->key);
             free(keyNode->value);
             free(keyNode); // Free the key node itself
@@ -121,3 +143,4 @@ void free_table(HashTable *ht) {
     pthread_rwlock_destroy(&ht->tablelock);
     free(ht);
 }
+

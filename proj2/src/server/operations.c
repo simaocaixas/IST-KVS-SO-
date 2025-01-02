@@ -55,6 +55,7 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE],
     if (write_pair(kvs_table, keys[i], values[i]) != 0) {
       fprintf(stderr, "Failed to write key pair (%s,%s)\n", keys[i], values[i]);
     }
+    
   }
 
   pthread_rwlock_unlock(&kvs_table->tablelock);
@@ -79,14 +80,14 @@ int kvs_subscription(const char* key, int notif_fd) {
   while (keyNode != NULL) {
         if (strcmp(keyNode->key, key) == 0) {
             // adicionar o fd a lista de notificacoes
-            for(int i = 0; i < S; i++) {
+            for(int i = 0; i < MAX_SESSION_COUNT; i++) {
               if (keyNode->notifications[i] == notif_fd){
                 fprintf(stderr, "Fd already subscribed!\n");
                 return 1;
               }
             }
 
-            for(int i = 0; i < S; i++) {
+            for(int i = 0; i < MAX_SESSION_COUNT; i++) {
               if (keyNode->notifications[i] == -3) {
                 keyNode->notifications[i] = notif_fd;
                 return 0;
@@ -121,7 +122,7 @@ int kvs_unsubscription(const char* key, int notif_fd) {
   KeyNode* previousNode = NULL;
   while (keyNode != NULL) {
         if (strcmp(keyNode->key, key) == 0) {
-            for(int i = 0; i < S; i++) {
+            for(int i = 0; i < MAX_SESSION_COUNT; i++) {
               if (keyNode->notifications[i] == notif_fd) {
                 keyNode->notifications[i] = -3;
                 return 0;

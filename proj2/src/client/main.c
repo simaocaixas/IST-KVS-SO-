@@ -43,7 +43,6 @@ int main(int argc, char* argv[]) {
     return 1;
   }
   
-
   while (1) {
     switch (get_next(STDIN_FILENO)) {
       case CMD_DISCONNECT:
