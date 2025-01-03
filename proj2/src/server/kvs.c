@@ -30,7 +30,6 @@ struct HashTable* create_hash_table() {
 }
 
 int notify_fds(int notifications[MAX_SESSION_COUNT], const char* key, const char* value, int bit){ 
-
     char buffer[MAX_STRING_SIZE];
     if (bit == 0) {
         snprintf(buffer, MAX_STRING_SIZE, "(%s,%s)", key, value);    
@@ -40,7 +39,7 @@ int notify_fds(int notifications[MAX_SESSION_COUNT], const char* key, const char
     
     for (int i = 0; i < MAX_SESSION_COUNT; i++) {
         if (notifications[i] > 0) {
-            if(write(notifications[i], buffer, strlen(buffer)) == -1) return 1;        
+            if(write(notifications[i], buffer, MAX_STRING_SIZE) == -1) return 1;        
         }
     }
     
