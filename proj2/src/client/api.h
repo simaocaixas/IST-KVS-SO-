@@ -4,8 +4,6 @@
 #include <stddef.h>
 #include "src/common/constants.h"
 
-int* get_notify_fd();
-
 /// Connects to a kvs server.
 /// @param req_pipe_path Path to the name pipe to be created for requests.
 /// @param resp_pipe_path Path to the name pipe to be created for responses.

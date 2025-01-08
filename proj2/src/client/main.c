@@ -5,13 +5,13 @@
 #include <string.h>
 #include <unistd.h>
 #include <semaphore.h>
-#include <errno.h>
 
 #include "parser.h"
 #include "src/client/api.h"
 #include "src/common/constants.h"
 #include "src/common/io.h"
 
+<<<<<<< HEAD
 
 void* manage_notifications(void *arguments) {
   int* notify_fd = (int*) arguments;
@@ -29,6 +29,8 @@ void* manage_notifications(void *arguments) {
    }
   return NULL;
 }
+=======
+>>>>>>> parent of c066523... 1 ex
 
 int main(int argc, char* argv[]) {
   if (argc < 3) {
@@ -61,10 +63,6 @@ int main(int argc, char* argv[]) {
     return 1;
   }
   
-  pthread_t thread_notify_me;
-  int* notify_fd = get_notify_fd();
-  pthread_create(&thread_notify_me, NULL, manage_notifications, notify_fd);
-
   while (1) {
     switch (get_next(STDIN_FILENO)) {
       case CMD_DISCONNECT:
@@ -73,7 +71,7 @@ int main(int argc, char* argv[]) {
           return 1;
         }
         // TODO: end notifications thread
-        pthread_join(thread_notify_me, NULL);
+        printf("Disconnected from server\n");
         // sem_post(&sem);
         return 0;
 

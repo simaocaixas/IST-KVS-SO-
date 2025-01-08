@@ -15,17 +15,12 @@ static const char* _resp_pipe_path;
 static const char* _notif_pipe_path;
 int _server_fd, _req_fd, _resp_fd, _notif_fd;
 
-int* get_notify_fd() {
-  return &_notif_fd;
-}
-
 int write_to_fd(int fd, const char *str) {
     size_t len = strlen(str);  // pode ser que o str não tenha o '\0' no final n sei 
     ssize_t written = 0;
     size_t total_written = 0;
 
     while (total_written < len) {
-
         written = write(fd, str + total_written, len - total_written);
         if (written < 0) {
             return 1;
@@ -164,6 +159,8 @@ int kvs_disconnect(void) {
   close(_req_fd); close(_resp_fd); close(_notif_fd);
   // Unlink the FIFOs
   unlink(_req_pipe_path); unlink(_resp_pipe_path); unlink(_notif_pipe_path);
+  printf("Disconnected from server\n");
+  fflush(stdout);
   return 0;
 
   /*
@@ -175,11 +172,11 @@ int kvs_disconnect(void) {
 
 int kvs_subscribe(const char* key) {
   // send subscribe message to request pipe and wait for response in response pipe
-  char buffer_request[MAX_STRING_SIZE], charOPCODE = '0' + OP_CODE_SUBSCRIBE;
-  snprintf(buffer_request, MAX_STRING_SIZE, "%d|%s", OP_CODE_SUBSCRIBE, key);
+  char buffer_request[MAX_CONNECT_STRING], charOPCODE = '0' + OP_CODE_SUBSCRIBE;
+  snprintf(buffer_request, MAX_CONNECT_STRING, "%d|%s", OP_CODE_SUBSCRIBE, key);
+  write_to_fd(_req_fd, buffer_request); // send subscribe message to request pipe
 
-  write(_req_fd, buffer_request, MAX_STRING_SIZE);
-  char buffer_response[MAX_STRING_SIZE];
+  char buffer_response[MAX_CONNECT_STRING];
   if(read(_resp_fd, buffer_response, 3) == -1) { // a read operation is for sure atomic because 3 bytes < block size (4096 bytes)
     fprintf(stderr, "Failed to open response FIFO\n");
     close(_resp_fd); close(_req_fd); close(_notif_fd);
@@ -206,17 +203,15 @@ int kvs_subscribe(const char* key) {
 int kvs_unsubscribe(const char* key) {
   // send unsubscribe message to request pipe and wait for response in response pipe
 
-  char buffer_request[MAX_STRING_SIZE];
-  snprintf(buffer_request, MAX_STRING_SIZE, "%d|%s",OP_CODE_UNSUBSCRIBE, key);
-  printf("ISTO E O BUFFER: %s\n", buffer_request);
-  printf("%d\n",_req_fd);
-  if(write(_req_fd, buffer_request, MAX_STRING_SIZE) < 0) {              // send unsubscribe message to request pipe
-    fprintf(stderr, "Failed to write to request FIFO\n");
+  char buffer_request[MAX_CONNECT_STRING];
+  snprintf(buffer_request, MAX_CONNECT_STRING, "%d|%s",OP_CODE_UNSUBSCRIBE, key);
+  if(write_to_fd(_req_fd, buffer_request) != 0) {              // send unsubscribe message to request pipe
+    fprintf(stderr, "Failed to write to response FIFO\n");
     close(_req_fd); close(_resp_fd); close(_notif_fd);
     return 1;
   } 
 
-  char buffer_response[MAX_STRING_SIZE], charOPCODE = '0' + OP_CODE_UNSUBSCRIBE;
+  char buffer_response[MAX_CONNECT_STRING], charOPCODE = '0' + OP_CODE_UNSUBSCRIBE;
 
   if(read(_resp_fd, buffer_response, 3) == -1) { // a read operation is for sure atomic because 3 bytes < block size (4096 bytes)
     fprintf(stderr, "Failed to open response FIFO\n");
