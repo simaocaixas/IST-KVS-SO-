@@ -87,8 +87,6 @@ int key_delete(KeySubNode **head, const char* key) {
   return 1;
 }
 
-// we have a list of clients: [client1_req_fd, client1_resp_fd, client1_notif_fd], [client2_req_fd, client2_resp_fd, client2_notif_fd], ...]
-
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t n_current_backups_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -333,10 +331,9 @@ int client_sudden_disconnect(Client *client){
   return 0;
 }
 
-static void* manage_clients(void* arguments) {
+static void* manage_clients(Client temp_client) {
  printf("[Thread %ld] Iniciada\n", pthread_self());
  
- Client* temp_client = (Client*) arguments;
  int client_req_fd = temp_client->client_req_fd;
  int client_resp_fd = temp_client->client_resp_fd;
  int client_notif_fd = temp_client->client_notif_fd; 
@@ -347,10 +344,19 @@ static void* manage_clients(void* arguments) {
    ssize_t bytes_read;
    bytes_read = read(client_req_fd, buffer, MAX_READ_SIZE);
    
+   /*
    if (bytes_read == 0) {
      printf("[Thread %ld] Cliente desconectou abruptamente\n", pthread_self()); 
      client_sudden_disconnect(temp_client);
      return 0;
+   }
+  */
+
+   if (bytes_read <= 0 || errno == EPIPE) {  
+     printf("[Thread %ld] Cliente desconectou abruptamente\n", pthread_self()); 
+     client_sudden_disconnect(temp_client);
+     return 0;
+
    }
 
    if (bytes_read > 0) {
@@ -454,6 +460,30 @@ static void* manage_clients(void* arguments) {
  return 0;
 }
 
+client *prod_consumer[MAX_SESSION_COUNT];
+
+static void *managers_wait_loop() {
+  
+  while (1) {
+    consume();
+  }
+}
+
+void consume() {
+  sem_wait(&has_client);
+  Client client  = prod_consumer[read_index];
+  read_index = (read_index + 1) % MAX_SESSION_COUNT;
+  sem_post(&is_full);
+  manage_clients(client);
+}
+
+void produce(Client c) {
+  sem_wait(&is_full);
+  prod_consumer[write_index] = c;
+  write_index = (write_index + 1) % MAX_SESSION_COUNT;
+  sem_post(&has_client);
+}
+
 static int dispatch_threads(DIR* dir) {
   pthread_t* threads = malloc(max_threads * sizeof(pthread_t));
 
@@ -541,7 +571,9 @@ static int dispatch_threads(DIR* dir) {
     }
   }
 
-  pthread_create(&management[0].thread, NULL, manage_clients, (void*)&management[0].client);
+  for (int i = 0; i <= MAX_SESSION_COUNT; i++) {
+    pthread_create(&management[i].thread, NULL, consumer, (void*)&management[0].client);
+  }
   
   if (pthread_join(management[0].thread, NULL) != 0) {
         fprintf(stderr, "Failed to join thread");

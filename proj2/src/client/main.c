@@ -12,12 +12,13 @@
 #include "src/common/constants.h"
 #include "src/common/io.h"
 
+
 void* manage_notifications(void *arguments) {
   int* notify_fd = (int*) arguments;
   while(1) {
     char buffer[MAX_STRING_SIZE];
     ssize_t bytes_read = read(*notify_fd, buffer, MAX_STRING_SIZE);
-        
+      
     if (bytes_read <= 0) {
       printf("Conection lost!\n"); // REVER REVER REVER REVER REVER REVER REVER REVER REVER
       exit(1); // Força encerramento do processo cliente
