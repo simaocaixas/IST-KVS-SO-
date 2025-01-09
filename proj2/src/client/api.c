@@ -85,7 +85,6 @@ int kvs_connect(char const* req_pipe_path, char const* resp_pipe_path, char cons
     unlink(req_pipe_path); unlink(resp_pipe_path); unlink(notif_pipe_path);
     return 1;
   }
-  close(_server_fd); // Fechar o FIFO do servidor
 
   // Abrir o FIFO de respostas (leitura)
   _resp_fd = open(resp_pipe_path, O_RDONLY);
@@ -140,7 +139,7 @@ int kvs_disconnect(void) {
   if(read(_resp_fd, buffer_response, 3) == -1) { // a read operation is for sure atomic because 3 bytes < block size (4096 bytes)
     fprintf(stderr, "Failed to open response FIFO\n");
     fflush(stderr);
-    close(_resp_fd); close(_req_fd); close(_notif_fd);
+    close(_resp_fd); close(_req_fd); close(_notif_fd); close(_server_fd);
     return 1;
   }  
 

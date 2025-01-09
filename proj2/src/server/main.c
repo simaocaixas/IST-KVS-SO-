@@ -18,6 +18,13 @@
 #include "io.h"
 #include "pthread.h"
 #include "kvs.h"
+#include "semaphore.h"
+
+int read_index = 0;
+int write_index = 0;
+sem_t empty;
+sem_t full;
+Client *client_server_buffer[MAX_SESSION_COUNT];
 
 struct SharedData {
   DIR* dir;
@@ -333,10 +340,9 @@ int client_sudden_disconnect(Client *client){
   return 0;
 }
 
-static void* manage_clients(void* arguments) {
+static void* manage_clients(Client *temp_client) {
  printf("[Thread %ld] Iniciada\n", pthread_self());
  
- Client* temp_client = (Client*) arguments;
  int client_req_fd = temp_client->client_req_fd;
  int client_resp_fd = temp_client->client_resp_fd;
  int client_notif_fd = temp_client->client_notif_fd; 
@@ -454,6 +460,27 @@ static void* manage_clients(void* arguments) {
  return 0;
 }
 
+void clients_loop() {
+  while(1) {
+    consume();
+  }
+} 
+
+void consume() {
+  sem_wait(&full);
+  Client* C = &client_server_buffer[read_index];
+  read_index = (read_index + 1) % MAX_SESSION_COUNT;
+  sem_post(&empty);
+  manage_clients(C);
+}
+
+void produce(Client *c) {
+  sem_wait(&empty);
+  client_server_buffer[write_index] = c;
+  write_index = (write_index + 1) % MAX_SESSION_COUNT;
+  sem_post(&full);
+}
+
 static int dispatch_threads(DIR* dir) {
   pthread_t* threads = malloc(max_threads * sizeof(pthread_t));
 
@@ -464,18 +491,23 @@ static int dispatch_threads(DIR* dir) {
 
   struct SharedData thread_data = {dir, jobs_directory, PTHREAD_MUTEX_INITIALIZER};
   
-  PipeData management[MAX_SESSION_COUNT];   // vector with [(thread,client),(thread,client)....]
+  for (size_t i = 0; i < max_threads; i++) {
+    if (pthread_create(&threads[i], NULL, get_file, (void*)&thread_data) != 0) {
+      fprintf(stderr, "Failed to create thread %zu\n", i);
+      pthread_mutex_destroy(&thread_data.directory_mutex);
+      free(threads);
+      return 1;
+    }
+  }
 
-  for (int i = 0; i < MAX_SESSION_COUNT; i++) {
-      management[i].client.client_req_fd = -1;
-      management[i].client.client_resp_fd = -1;
-      management[i].client.client_notif_fd = -1;
-      management[i].client.subscriptions = NULL;
-      management[i].thread = 0; 
+  pthread_t manager_threads[MAX_SESSION_COUNT];
+
+  for(int i = 0; i < MAX_SESSION_COUNT; i++) {
+    pthread_create(&manager_threads[i], NULL, clients_loop, NULL);
   }
 
   strncat(server_pipe_path, fifo_server, strlen(fifo_server) * sizeof(char));
-  
+
   if(unlink(server_pipe_path) != 0 && errno != ENOENT) {
     fprintf(stderr, "Failed to unlink server FIFO!\n");
     return 1;
@@ -496,57 +528,48 @@ static int dispatch_threads(DIR* dir) {
   // Abrir para escrita para mais clientes
 
   // LER A MENSAGEM DE CONNECT
-
-  char buffer[MAX_READ_SIZE];
-  
-  // Loop para mais clientes
-  if(read(fifo_fd_read, buffer, MAX_READ_SIZE) == -1) { // 1|<PipeCliente(pedidos)>|<PipeCliente(respostas)>|<PipeCliente(notificacoes)>
-    write_str(STDERR_FILENO, "Failed to read from FIFO\n");
-    return 1;
-  }
-
-  close(fifo_fd_read);
-  
-
-  char* saveptr = NULL;
-  char* token = strtok_r(buffer, "|", &saveptr);
-
-  if (token == NULL || strcmp(token, "1") != 0) {
-    write_str(STDERR_FILENO, "Invalid message\n");
-    return 1;
-  }
-
-  char* token1 = strtok_r(NULL, "|", &saveptr);
-  char* token2 = strtok_r(NULL, "|", &saveptr);
-  char* token3 = strtok_r(NULL, "|", &saveptr);
-  
-  management[0].client.client_resp_fd = open(token2, O_WRONLY);
-  management[0].client.client_notif_fd = open(token3, O_WRONLY);
-  management[0].client.client_req_fd = open(token1, O_RDONLY);
-
-  char answer[MAX_WRITE_SIZE];
-  snprintf(answer, MAX_WRITE_SIZE, "%d|0", OP_CODE_CONNECT);
-
-  if(write(management[0].client.client_resp_fd, answer, strlen(answer)) == -1) {
-    fprintf(stderr, "Failed to write answer to fd: %s\n", CONNECT);
-    return 1;
-  }
-
-  for (size_t i = 0; i < max_threads; i++) {
-    if (pthread_create(&threads[i], NULL, get_file, (void*)&thread_data) != 0) {
-      fprintf(stderr, "Failed to create thread %zu\n", i);
-      pthread_mutex_destroy(&thread_data.directory_mutex);
-      free(threads);
+  while (1) {
+    char buffer[MAX_READ_SIZE];
+    
+    // Loop para mais clientes
+    if(read(fifo_fd_read, buffer, MAX_READ_SIZE) == -1) { // 1|<PipeCliente(pedidos)>|<PipeCliente(respostas)>|<PipeCliente(notificacoes)>
+      write_str(STDERR_FILENO, "Failed to read from FIFO\n");
       return 1;
     }
+
+    char* saveptr = NULL;
+    char* token = strtok_r(buffer, "|", &saveptr);
+
+    if (token == NULL || strcmp(token, "1") != 0) {
+      write_str(STDERR_FILENO, "Invalid message\n");
+      return 1;
+    }
+
+    char* token1 = strtok_r(NULL, "|", &saveptr);
+    char* token2 = strtok_r(NULL, "|", &saveptr);
+    char* token3 = strtok_r(NULL, "|", &saveptr);
+    
+    Client *new_client = malloc(sizeof(Client));
+    new_client->client_resp_fd = open(token2, O_WRONLY);
+    new_client->client_notif_fd = open(token3, O_WRONLY);
+    new_client->client_req_fd = open(token1, O_RDONLY);
+    new_client->subscriptions = NULL;
+
+    char answer[MAX_WRITE_SIZE];
+    snprintf(answer, MAX_WRITE_SIZE, "%d|0", OP_CODE_CONNECT);
+    
+    if(write(new_client->client_resp_fd, answer, strlen(answer)) == -1) {
+      fprintf(stderr, "Failed to write answer to fd: %s\n", CONNECT);
+      return 1;
+    }
+
   }
 
-  pthread_create(&management[0].thread, NULL, manage_clients, (void*)&management[0].client);
-  
-  if (pthread_join(management[0].thread, NULL) != 0) {
-        fprintf(stderr, "Failed to join thread");
-        free(threads);
-        return 1;
+  for (unsigned int i = 0; i < MAX_SESSION_COUNT; i++) {
+    if (pthread_join(manager_threads[i], NULL) != 0) {
+      fprintf(stderr, "Failed to join thread");
+      return 1;
+    }
   }
 
   for (unsigned int i = 0; i < max_threads; i++) {
@@ -610,6 +633,8 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  sem_init(&empty, 0, MAX_SESSION_COUNT);
+  sem_init(&full, 0, 0);
   // Loop 
 
   DIR* dir = opendir(argv[1]);
