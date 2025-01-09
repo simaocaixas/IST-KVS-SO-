@@ -100,7 +100,6 @@ int kvs_subscription(const char* key, int notif_fd) {
       keyNode = previousNode->next; // Move to the next node
     }
 
-    fprintf(stderr, "Key not found\n");
     return 1;
   // colocar o fd na lista da chave (se a chave existir)
 }
@@ -132,7 +131,6 @@ int kvs_unsubscription(const char* key, int notif_fd) {
       previousNode = keyNode;
       keyNode = previousNode->next; // Move to the next node
     }
-  fprintf(stderr, "Key not found\n");
   return 1;
 }
 

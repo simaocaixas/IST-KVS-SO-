@@ -5,20 +5,19 @@
 #include <string.h>
 #include <unistd.h>
 #include <semaphore.h>
+#include <errno.h>
 
 #include "parser.h"
 #include "src/client/api.h"
 #include "src/common/constants.h"
 #include "src/common/io.h"
 
-<<<<<<< HEAD
-
 void* manage_notifications(void *arguments) {
   int* notify_fd = (int*) arguments;
   while(1) {
     char buffer[MAX_STRING_SIZE];
     ssize_t bytes_read = read(*notify_fd, buffer, MAX_STRING_SIZE);
-      
+        
     if (bytes_read <= 0) {
       printf("Conection lost!\n"); // REVER REVER REVER REVER REVER REVER REVER REVER REVER
       exit(1); // Força encerramento do processo cliente
@@ -29,8 +28,6 @@ void* manage_notifications(void *arguments) {
    }
   return NULL;
 }
-=======
->>>>>>> parent of c066523... 1 ex
 
 int main(int argc, char* argv[]) {
   if (argc < 3) {
@@ -63,6 +60,10 @@ int main(int argc, char* argv[]) {
     return 1;
   }
   
+  pthread_t thread_notify_me;
+  int* notify_fd = get_notify_fd();
+  pthread_create(&thread_notify_me, NULL, manage_notifications, notify_fd);
+
   while (1) {
     switch (get_next(STDIN_FILENO)) {
       case CMD_DISCONNECT:
@@ -71,7 +72,7 @@ int main(int argc, char* argv[]) {
           return 1;
         }
         // TODO: end notifications thread
-        printf("Disconnected from server\n");
+        pthread_join(thread_notify_me, NULL);
         // sem_post(&sem);
         return 0;
 

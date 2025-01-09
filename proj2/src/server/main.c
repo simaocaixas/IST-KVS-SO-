@@ -9,7 +9,6 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include <errno.h>
-#include <semaphore.h> 
 
 #include "src/server/constants.h"
 #include "src/common/constants.h"
@@ -19,24 +18,6 @@
 #include "io.h"
 #include "pthread.h"
 #include "kvs.h"
-
-sem_t has_client;
-sem_t is_full;
-int read_index = 0;  
-int write_index = 0;
-pthread_mutex_t buffer_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-int init_semaphores() {
-    if (sem_init(&has_client, 0, 0) != 0) {
-        perror("Failed to initialize has_client semaphore");
-        return 1;
-    }
-    if (sem_init(&is_full, 0, MAX_SESSION_COUNT) != 0) {
-        perror("Failed to initialize is_full semaphore");
-        return 1;
-    }
-    return 0;
-}
 
 struct SharedData {
   DIR* dir;
@@ -51,7 +32,10 @@ typedef struct {
   KeySubNode *subscriptions;
 } Client;
 
-Client *prod_consumer[MAX_SESSION_COUNT];
+typedef struct PipeData {
+  pthread_t thread;
+  Client client;
+} PipeData;
 
 int key_insert(KeySubNode **head, const char* key) {
   KeySubNode *new_node = (KeySubNode*)malloc(sizeof(KeySubNode));
@@ -102,6 +86,8 @@ int key_delete(KeySubNode **head, const char* key) {
 
   return 1;
 }
+
+// we have a list of clients: [client1_req_fd, client1_resp_fd, client1_notif_fd], [client2_req_fd, client2_resp_fd, client2_notif_fd], ...]
 
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t n_current_backups_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -248,15 +234,11 @@ static int run_job(int in_fd, int out_fd, char* filename) {
     }
   }
 }
-<<<<<<< HEAD
-=======
 /*
   static void* manage_client(void* arguments) {
 
   }
 */
- 
->>>>>>> parent of c066523... 1 ex
 
 //frees arguments
 static void* get_file(void* arguments) {
@@ -332,8 +314,10 @@ int client_sudden_disconnect(Client *client){
   int client_notif_fd = client->client_notif_fd; 
 
   KeySubNode *current = client->subscriptions;
-          
+  KeySubNode *next;
+
   while (current != NULL) {
+    next = current->next;
     if (kvs_unsubscription(current->key, client->client_notif_fd) != 0) {
       fprintf(stderr, "Failed to unsubscribe key: %s\n", current->key);
     }
@@ -341,7 +325,7 @@ int client_sudden_disconnect(Client *client){
     if(key_delete(&client->subscriptions, current->key) != 0) {
       fprintf(stderr, "Failed to delete subscription from key: %s\n", current->key);
     }
-    current = current->next;
+    current = next;
   }
 
   close(client_req_fd); close(client_resp_fd); close(client_notif_fd);
@@ -349,10 +333,10 @@ int client_sudden_disconnect(Client *client){
   return 0;
 }
 
-<<<<<<< HEAD
-int manage_clients(Client *temp_client) {
+static void* manage_clients(void* arguments) {
  printf("[Thread %ld] Iniciada\n", pthread_self());
-
+ 
+ Client* temp_client = (Client*) arguments;
  int client_req_fd = temp_client->client_req_fd;
  int client_resp_fd = temp_client->client_resp_fd;
  int client_notif_fd = temp_client->client_notif_fd; 
@@ -363,19 +347,10 @@ int manage_clients(Client *temp_client) {
    ssize_t bytes_read;
    bytes_read = read(client_req_fd, buffer, MAX_READ_SIZE);
    
-   /*
    if (bytes_read == 0) {
      printf("[Thread %ld] Cliente desconectou abruptamente\n", pthread_self()); 
      client_sudden_disconnect(temp_client);
      return 0;
-   }
-  */
-
-   if (bytes_read <= 0 || errno == EPIPE) {  
-     printf("[Thread %ld] Cliente desconectou abruptamente\n", pthread_self()); 
-     client_sudden_disconnect(temp_client);
-     return 0;
-
    }
 
    if (bytes_read > 0) {
@@ -477,208 +452,27 @@ int manage_clients(Client *temp_client) {
    }
  }
  return 0;
-=======
-static void* manage_clients(void* arguments) {
-
-  Client* temp_client = (Client*) arguments;
-  
-  int client_req_fd = temp_client->client_req_fd; // we (server) will write to this
-  int client_resp_fd = temp_client->client_resp_fd; // we will read from this
-  int client_notif_fd = temp_client->client_notif_fd; 
-
-  while (1) {
-    char buffer[MAX_READ_SIZE];
-    ssize_t bytes_read;
-    bytes_read = read(client_req_fd,buffer,MAX_READ_SIZE);
-    
-    if (bytes_read == 0) {
-      client_sudden_disconnect(temp_client);
-      return 0;
-    }
-
-    if (bytes_read > 0) {
-        
-      int res, cleanup_success;
-      char *saveptr = NULL, answer[MAX_WRITE_SIZE];
-      char* token = strtok_r(buffer, "|", &saveptr);
-      const char* key = NULL;
-
-      switch (atoi(token)) {
-        
-        case OP_CODE_DISCONNECT:
-          // disconnect>
-          /*
-           -> USAR FLAG PARA ANSWER CASO TENHA HAVIDO ERROS 
-           -> eliminar subscrições
-           -> apagar o cliente da estutura de dados
-           -> fechar os pipes 
-           -> adaptar resposta servidor
-          -> enviar a mensagem
-          */
-
-          //TIRAR SUBSCRICOES DO CLIENTE NAS CHAVES
-          cleanup_success = 1;
-          KeySubNode *current = temp_client->subscriptions;
-          
-          while (current != NULL) {
-            if (kvs_unsubscription(current->key, temp_client->client_notif_fd) != 0) {
-              fprintf(stderr, "Failed to unsubscribe key: %s\n", current->key);
-              cleanup_success = 0;
-            }
-
-            if(key_delete(&temp_client->subscriptions, current->key) != 0) {
-              fprintf(stderr, "Failed to delete subscription from key: %s\n", current->key);
-              cleanup_success = 0;
-            }
-            current = current->next;
-          }
-
-          if (cleanup_success) {
-              snprintf(answer, MAX_WRITE_SIZE, "%d|0", OP_CODE_DISCONNECT);
-          } else {
-              snprintf(answer, MAX_WRITE_SIZE, "%d|1", OP_CODE_DISCONNECT);
-          }
-
-          if(write(client_resp_fd, answer, strlen(answer)) == -1) {
-            fprintf(stderr, "Failed to write answer to fd : %s\n", DISCONNECT);
-            return 0;
-          }
-
-          close(client_req_fd); close(client_resp_fd); close(client_notif_fd);
-          
-          return 0;
-          
-        case OP_CODE_SUBSCRIBE:
-          
-          // (char) OP_CODE=3 | char[41] key
-
-           /*
-            -> adquirir chave
-            -> aceder à chave
-            -> adicionar cliente estrutura dados 
-            -> verificar se chave existe e retornar
-            -> enviar a mensagem
-          */
-          // subscribe
-
-          // (char) OP_CODE=3 | (char) result
-          key = strtok_r(NULL, "|", &saveptr);
-          res = kvs_subscription(key, client_notif_fd);
-
-          if(res == 0) {
-            if(key_insert(&temp_client->subscriptions, key) != 0) {
-              fprintf(stderr, "Failed to insert subscription key!\n");
-              return 0;
-            }
-            snprintf(answer, MAX_WRITE_SIZE, "%d|1", OP_CODE_SUBSCRIBE);
-          
-          } else {
-            snprintf(answer, MAX_WRITE_SIZE, "%d|0", OP_CODE_SUBSCRIBE);
-          }
-
-          if(write(client_resp_fd, answer, strlen(answer)) == -1) {
-            fprintf(stderr, "Failed to write answer to fd : %s\n", SUBSCRIBE);
-            return 0;
-          }
-          break;
-
-        case OP_CODE_UNSUBSCRIBE:
-
-          key = strtok_r(NULL, "|", &saveptr);
-          res = kvs_unsubscription(key, client_notif_fd);
-
-          if(res == 0) {
-            
-            if(key_delete(&temp_client->subscriptions, key) != 0) {
-              fprintf(stderr, "Failed to delete subscription key!\n");
-              return 0;
-            }
-            snprintf(answer, MAX_WRITE_SIZE, "%d|0", OP_CODE_UNSUBSCRIBE);
-          
-          } else {
-            snprintf(answer, MAX_WRITE_SIZE, "%d|1", OP_CODE_UNSUBSCRIBE);
-          }
-
-          if(write(client_resp_fd, answer, strlen(answer)) == -1) {
-            fprintf(stderr, "Failed to write answer to fd : %s\n", UNSUBSCRIBE);
-            return 0;
-          }
-          
-          break;
-
-        default:
-          write_str(STDERR_FILENO, "Invalid message, opcode not recognized!\n");
-          break;
-      }
-    }
-
-  }
-  return 0;
->>>>>>> parent of c066523... 1 ex
-}
-
-void consume() {
-  sem_wait(&has_client);
-  pthread_mutex_lock(&buffer_mutex);
-  Client *client  = prod_consumer[read_index];
-  read_index = (read_index + 1) % MAX_SESSION_COUNT;
-  pthread_mutex_unlock(&buffer_mutex);
-  sem_post(&is_full);
-  manage_clients(client);
-}
-
-void produce(Client *c) {
-  sem_wait(&is_full);
-  pthread_mutex_lock(&buffer_mutex);
-  prod_consumer[write_index] = c;
-  write_index = (write_index + 1) % MAX_SESSION_COUNT;
-  pthread_mutex_unlock(&buffer_mutex);
-  sem_post(&has_client);
-}
-
-static void *managers_wait_loop() {
-  
-  while (1) {
-    consume();
-  }
-
-  return 0;
 }
 
 static int dispatch_threads(DIR* dir) {
   pthread_t* threads = malloc(max_threads * sizeof(pthread_t));
-  
+
   if (threads == NULL) {
     fprintf(stderr, "Failed to allocate memory for threads\n");
     return 1;
   }
 
-<<<<<<< HEAD
-  struct SharedData thread_data = {dir, jobs_directory, PTHREAD_MUTEX_INITIALIZER};  
-  pthread_t management[MAX_SESSION_COUNT];   
-=======
   struct SharedData thread_data = {dir, jobs_directory, PTHREAD_MUTEX_INITIALIZER};
   
   PipeData management[MAX_SESSION_COUNT];   // vector with [(thread,client),(thread,client)....]
 
-for (int i = 0; i < MAX_SESSION_COUNT; i++) {
-    management[i].client.client_req_fd = -1;
-    management[i].client.client_resp_fd = -1;
-    management[i].client.client_notif_fd = -1;
-    management[i].client.subscriptions = NULL;
-    management[i].thread = 0; 
-}
-
-
-for (size_t i = 0; i < max_threads; i++) {
-  if (pthread_create(&threads[i], NULL, get_file, (void*)&thread_data) != 0) {
-    fprintf(stderr, "Failed to create thread %zu\n", i);
-    pthread_mutex_destroy(&thread_data.directory_mutex);
-    free(threads);
-    return 1;
+  for (int i = 0; i < MAX_SESSION_COUNT; i++) {
+      management[i].client.client_req_fd = -1;
+      management[i].client.client_resp_fd = -1;
+      management[i].client.client_notif_fd = -1;
+      management[i].client.subscriptions = NULL;
+      management[i].thread = 0; 
   }
-}
->>>>>>> parent of c066523... 1 ex
 
   strncat(server_pipe_path, fifo_server, strlen(fifo_server) * sizeof(char));
   
@@ -699,66 +493,21 @@ for (size_t i = 0; i < max_threads; i++) {
     return 1;
   }
 
-  for (size_t i = 0; i < max_threads; i++) {
-    if (pthread_create(&threads[i], NULL, get_file, (void*)&thread_data) != 0) {
-      fprintf(stderr, "Failed to create thread %zu\n", i);
-      pthread_mutex_destroy(&thread_data.directory_mutex);
-      free(threads);
-      return 1;
-    }
-  }
+  // Abrir para escrita para mais clientes
 
-<<<<<<< HEAD
-  for (int i = 0; i <= MAX_SESSION_COUNT; i++) {
-    pthread_create(&management[i], NULL, managers_wait_loop, NULL);
-  }
+  // LER A MENSAGEM DE CONNECT
 
-  while (1) {
-    char buffer[MAX_READ_SIZE];
-    // Loop para mais clientes
-    if(read(fifo_fd_read, buffer, MAX_READ_SIZE) == -1) { // 1|<PipeCliente(pedidos)>|<PipeCliente(respostas)>|<PipeCliente(notificacoes)>
-      write_str(STDERR_FILENO, "Failed to read from FIFO\n");
-      return 1;
-    }
-    char* saveptr = NULL;
-    char* token = strtok_r(buffer, "|", &saveptr);
-    if (token == NULL || strcmp(token, "1") != 0) {
-      write_str(STDERR_FILENO, "Invalid message\n");
-      return 1;
-    }
-    char* token1 = strtok_r(NULL, "|", &saveptr);
-    char* token2 = strtok_r(NULL, "|", &saveptr);
-    char* token3 = strtok_r(NULL, "|", &saveptr);
-
-    Client new_client;
-    new_client.client_resp_fd = open(token2, O_WRONLY);
-    new_client.client_notif_fd = open(token3, O_WRONLY);
-    new_client.client_req_fd = open(token1, O_RDONLY);
-    new_client.subscriptions = NULL;
-
-    char answer[MAX_WRITE_SIZE];
-    snprintf(answer, MAX_WRITE_SIZE, "%d|0", OP_CODE_CONNECT);
-
-    if(write(new_client.client_resp_fd, answer, strlen(answer)) == -1) {
-      fprintf(stderr, "Failed to write answer to fd: %s\n", CONNECT);
-      return 1;
-    }
-
-    Client* client_ptr = malloc(sizeof(Client));
-    *client_ptr = new_client;
-    produce(client_ptr);
-  }
+  char buffer[MAX_READ_SIZE];
   
-for (unsigned int i = 0; i <= MAX_SESSION_COUNT; i++) { 
-  if (pthread_join(management[i], NULL) != 0) {
-        fprintf(stderr, "Failed to join thread");
-        free(threads);
-        return 1;
+  // Loop para mais clientes
+  if(read(fifo_fd_read, buffer, MAX_READ_SIZE) == -1) { // 1|<PipeCliente(pedidos)>|<PipeCliente(respostas)>|<PipeCliente(notificacoes)>
+    write_str(STDERR_FILENO, "Failed to read from FIFO\n");
+    return 1;
   }
-}
-=======
+
   close(fifo_fd_read);
   
+
   char* saveptr = NULL;
   char* token = strtok_r(buffer, "|", &saveptr);
 
@@ -774,17 +523,31 @@ for (unsigned int i = 0; i <= MAX_SESSION_COUNT; i++) {
   management[0].client.client_resp_fd = open(token2, O_WRONLY);
   management[0].client.client_notif_fd = open(token3, O_WRONLY);
   management[0].client.client_req_fd = open(token1, O_RDONLY);
- 
+
   char answer[MAX_WRITE_SIZE];
   snprintf(answer, MAX_WRITE_SIZE, "%d|0", OP_CODE_CONNECT);
+
   if(write(management[0].client.client_resp_fd, answer, strlen(answer)) == -1) {
     fprintf(stderr, "Failed to write answer to fd: %s\n", CONNECT);
     return 1;
   }
-  
-  // Agora vamos colocar as threads gestoras a funcionar! (futuramente vamos ter de fazer um loop para mais clientes)
+
+  for (size_t i = 0; i < max_threads; i++) {
+    if (pthread_create(&threads[i], NULL, get_file, (void*)&thread_data) != 0) {
+      fprintf(stderr, "Failed to create thread %zu\n", i);
+      pthread_mutex_destroy(&thread_data.directory_mutex);
+      free(threads);
+      return 1;
+    }
+  }
+
   pthread_create(&management[0].thread, NULL, manage_clients, (void*)&management[0].client);
->>>>>>> parent of c066523... 1 ex
+  
+  if (pthread_join(management[0].thread, NULL) != 0) {
+        fprintf(stderr, "Failed to join thread");
+        free(threads);
+        return 1;
+  }
 
   for (unsigned int i = 0; i < max_threads; i++) {
     if (pthread_join(threads[i], NULL) != 0) {
@@ -798,7 +561,7 @@ for (unsigned int i = 0; i <= MAX_SESSION_COUNT; i++) {
   if (pthread_mutex_destroy(&thread_data.directory_mutex) != 0) {
     fprintf(stderr, "Failed to destroy directory_mutex\n");
   }
-  close(fifo_fd_read);
+
   free(threads);
   return 0;
 }
@@ -849,11 +612,6 @@ int main(int argc, char** argv) {
 
   // Loop 
 
-  if (init_semaphores() != 0) {
-    fprintf(stderr, "Failed to initialize semaphores\n");
-    return 1;
-  }
-
   DIR* dir = opendir(argv[1]);
   if (dir == NULL) {
     fprintf(stderr, "Failed to open directory: %s\n", argv[1]);
@@ -873,7 +631,7 @@ int main(int argc, char** argv) {
   }
 
   kvs_terminate();
-  pthread_mutex_destroy(&buffer_mutex);
+
   return 0;
 }
 
