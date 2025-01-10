@@ -206,9 +206,7 @@ int kvs_unsubscribe(const char* key) {
   // send unsubscribe message to request pipe and wait for response in response pipe
 
   char buffer_request[MAX_STRING_SIZE];
-  snprintf(buffer_request, MAX_STRING_SIZE, "%d|%s",OP_CODE_UNSUBSCRIBE, key);
-  printf("ISTO E O BUFFER: %s\n", buffer_request);
-  printf("%d\n",_req_fd);
+  snprintf(buffer_request, MAX_STRING_SIZE, "%d|%s",OP_CODE_UNSUBSCRIBE, key); 
   if(write(_req_fd, buffer_request, MAX_STRING_SIZE) < 0) {              // send unsubscribe message to request pipe
     fprintf(stderr, "Failed to write to request FIFO\n");
     close(_req_fd); close(_resp_fd); close(_notif_fd);

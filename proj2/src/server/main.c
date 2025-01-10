@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <signal.h>
 
 #include "src/server/constants.h"
 #include "src/common/constants.h"
@@ -20,11 +21,12 @@
 #include "kvs.h"
 #include "semaphore.h"
 
+int sig_flag = 0;
 int read_index = 0;
 int write_index = 0;
 sem_t empty;
 sem_t full;
-Client *client_server_buffer[MAX_SESSION_COUNT];
+pthread_mutex_t semExMut = PTHREAD_MUTEX_INITIALIZER;
 
 struct SharedData {
   DIR* dir;
@@ -38,6 +40,9 @@ typedef struct {
   int client_notif_fd;
   KeySubNode *subscriptions;
 } Client;
+
+Client *client_server_buffer[MAX_SESSION_COUNT];
+Client *clients_list[MAX_SESSION_COUNT];
 
 typedef struct PipeData {
   pthread_t thread;
@@ -241,14 +246,15 @@ static int run_job(int in_fd, int out_fd, char* filename) {
     }
   }
 }
-/*
-  static void* manage_client(void* arguments) {
-
-  }
-*/
 
 //frees arguments
 static void* get_file(void* arguments) {
+
+  sigset_t set;
+  sigemptyset(&set);
+  sigaddset(&set, SIGUSR1);
+  pthread_sigmask(SIG_BLOCK, &set, NULL);
+
   struct SharedData* thread_data = (struct SharedData*) arguments;
   DIR* dir = thread_data->dir;
   char* dir_name = thread_data->dir_name;
@@ -353,6 +359,10 @@ static void* manage_clients(Client *temp_client) {
    ssize_t bytes_read;
    bytes_read = read(client_req_fd, buffer, MAX_READ_SIZE);
    
+   if (sig_flag == 1) {
+    return 0;
+   }
+
    if (bytes_read == 0) {
      printf("[Thread %ld] Cliente desconectou abruptamente\n", pthread_self()); 
      client_sudden_disconnect(temp_client);
@@ -460,26 +470,36 @@ static void* manage_clients(Client *temp_client) {
  return 0;
 }
 
-void clients_loop() {
-  while(1) {
-    consume();
-  }
-} 
-
 void consume() {
   sem_wait(&full);
-  Client* C = &client_server_buffer[read_index];
+  pthread_mutex_lock(&semExMut);
+  Client* C = client_server_buffer[read_index];
   read_index = (read_index + 1) % MAX_SESSION_COUNT;
+  pthread_mutex_unlock(&semExMut);
   sem_post(&empty);
   manage_clients(C);
 }
 
 void produce(Client *c) {
   sem_wait(&empty);
+  pthread_mutex_lock(&semExMut);
   client_server_buffer[write_index] = c;
   write_index = (write_index + 1) % MAX_SESSION_COUNT;
+  pthread_mutex_unlock(&semExMut);
   sem_post(&full);
 }
+
+void* clients_loop() {
+
+  sigset_t set;
+  sigemptyset(&set);
+  sigaddset(&set, SIGUSR1);
+  pthread_sigmask(SIG_BLOCK, &set, NULL);
+
+  while(1) {
+    consume();
+  }
+} 
 
 static int dispatch_threads(DIR* dir) {
   pthread_t* threads = malloc(max_threads * sizeof(pthread_t));
@@ -536,6 +556,13 @@ static int dispatch_threads(DIR* dir) {
       write_str(STDERR_FILENO, "Failed to read from FIFO\n");
       return 1;
     }
+    
+    /*
+    if (sig_flag == 1) {
+      for (int i = 0; i < MAX_SESSION_COUNT; i++)
+    }
+    */
+    
 
     char* saveptr = NULL;
     char* token = strtok_r(buffer, "|", &saveptr);
@@ -563,6 +590,8 @@ static int dispatch_threads(DIR* dir) {
       return 1;
     }
 
+    clients_list[write_index] = new_client;
+    produce(new_client);    
   }
 
   for (unsigned int i = 0; i < MAX_SESSION_COUNT; i++) {
@@ -589,7 +618,16 @@ static int dispatch_threads(DIR* dir) {
   return 0;
 }
 
+void sig_handle() {
+  sig_flag = 1;
+}
+
 int main(int argc, char** argv) {
+  if (signal(SIGUSR1,sig_handle) == SIG_ERR) {
+    perror("signal could not be resolved\n");
+    exit(EXIT_FAILURE);
+  }
+  
   if (argc < 5) {
     write_str(STDERR_FILENO, "Usage: ");
     write_str(STDERR_FILENO, argv[0]);
@@ -656,10 +694,17 @@ int main(int argc, char** argv) {
   }
 
   kvs_terminate();
-
+  
   return 0;
 }
 
 
 
 
+/*
+ex 2
+
+->
+
+
+*/
