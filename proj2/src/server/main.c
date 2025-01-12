@@ -478,6 +478,33 @@ static void* manage_clients(Client *temp_client) {
            fprintf(stderr, "[Thread %ld] Falha enviar resposta subscribe\n", pthread_self());
            return 0;
          }
+
+          for (int i = 0; i < MAX_SESSION_COUNT; i++) {
+            if (clients_list[i] == NULL) {
+                printf("Client[%d]: NULL\n", i);
+                continue;
+            }
+            
+            printf("Client[%d]:\n", i);
+            printf("  Request FD: %d\n", clients_list[i]->client_req_fd);
+            printf("  Response FD: %d\n", clients_list[i]->client_resp_fd);
+            printf("  Notification FD: %d\n", clients_list[i]->client_notif_fd);
+            
+            // Imprimir as subscrições
+            printf("  Subscriptions: ");
+            KeySubNode *current2 = clients_list[i]->subscriptions;
+            if (current2 == NULL) {
+                printf("None\n");
+            } else {
+                printf("\n");
+                while (current2 != NULL) {
+                    printf("    - Key: %s\n", current2->key);
+                    current2 = current2->next;
+                }
+            }
+            printf("\n");
+          }
+
          break;
 
        case OP_CODE_UNSUBSCRIBE:
@@ -507,6 +534,33 @@ static void* manage_clients(Client *temp_client) {
            fprintf(stderr, "[Thread %ld] Falha enviar resposta unsubscribe\n", pthread_self());
            return 0;
          }
+
+          for (int i = 0; i < MAX_SESSION_COUNT; i++) {
+            if (clients_list[i] == NULL) {
+                printf("Client[%d]: NULL\n", i);
+                continue;
+            }
+            
+            printf("Client[%d]:\n", i);
+            printf("  Request FD: %d\n", clients_list[i]->client_req_fd);
+            printf("  Response FD: %d\n", clients_list[i]->client_resp_fd);
+            printf("  Notification FD: %d\n", clients_list[i]->client_notif_fd);
+            
+            // Imprimir as subscrições
+            printf("  Subscriptions: ");
+            KeySubNode *current3 = clients_list[i]->subscriptions;
+            if (current3 == NULL) {
+                printf("None\n");
+            } else {
+                printf("\n");
+                while (current3 != NULL) {
+                    printf("    - Key: %s\n", current3->key);
+                    current3 = current3->next;
+                }
+            }
+            printf("\n");
+          }
+          
          break;
 
        default:

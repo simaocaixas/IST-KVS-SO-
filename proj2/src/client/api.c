@@ -166,11 +166,6 @@ int kvs_disconnect(void) {
   unlink(_req_pipe_path); unlink(_resp_pipe_path); unlink(_notif_pipe_path);
   return 0;
 
-  /*
-    APAGAR SUBSCRICOES DO CLIENTE NAS CHAVES
-    APAGAR SUBSCRICOES DO CLIENTE NAS CHAVES 
-    APAGAR SUBSCRICOES DO CLIENTE NAS CHAVES
-  */
 }
 
 int kvs_subscribe(const char* key) {
@@ -227,7 +222,7 @@ int kvs_unsubscribe(const char* key) {
       fprintf(stdout, "Server returned 0 for operation: %s\n", UNSUBSCRIBE); // Server returned <response-code> for operation: <connect|disconnect|subscribe|unsubscribe>
     } else {
       fprintf(stdout, "Server returned 1 for operation: %s\n", UNSUBSCRIBE); // Server returned <response-code> for operation: <connect|disconnect|subscribe|unsubscribe>
-      fprintf(stderr, "Could not subscribe to key! (Key not Found)\n");
+      fprintf(stderr, "Could not unsubscribe to key!\n");
       return 1;
     }
   } else {

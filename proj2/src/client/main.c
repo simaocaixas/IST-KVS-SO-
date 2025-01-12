@@ -22,7 +22,7 @@ void* manage_notifications(void *arguments) {
       printf("Conection lost! (Server received a SIGURS1)\n"); 
       exit(1); 
     } else if (bytes_read == 0) {
-      printf("Connection lost due to pipe closed or ...\n");
+      printf("Connection lost due to pipe closed!\n");
       exit(1);
     }
         
@@ -96,7 +96,7 @@ int main(int argc, char* argv[]) {
         }
          
         if (kvs_unsubscribe(keys[0])) {
-            fprintf(stderr, "Command subscribe failed\n");
+            fprintf(stderr, "Command unsubscribe failed\n");
         }
 
         break;

@@ -1,9 +1,12 @@
 Servidor:
 
-    -> ligar fifos do cliente no sevidor
-
+  jobs:
+  w
+  kill
 
 
 
 
 Cliente:
+
+    sub 
