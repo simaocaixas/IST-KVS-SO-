@@ -12,7 +12,7 @@
 #include "io.h"
 #include "kvs.h"
 
-static struct HashTable *kvs_table = NULL;
+static struct HashTable* kvs_table = NULL;
 
 /// Calculates a timespec from a delay in milliseconds.
 /// @param delay_ms Delay in milliseconds.
@@ -42,8 +42,7 @@ int kvs_terminate() {
   return 0;
 }
 
-int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE],
-              char values[][MAX_STRING_SIZE]) {
+int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE], char values[][MAX_STRING_SIZE]) {
   if (kvs_table == NULL) {
     fprintf(stderr, "KVS state must be initialized\n");
     return 1;
@@ -55,7 +54,6 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE],
     if (write_pair(kvs_table, keys[i], values[i]) != 0) {
       fprintf(stderr, "Failed to write key pair (%s,%s)\n", keys[i], values[i]);
     }
-    
   }
 
   pthread_rwlock_unlock(&kvs_table->tablelock);
@@ -65,73 +63,78 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE],
 int kvs_subscription(const char* key, int notif_fd) {
   if (kvs_table == NULL) {
     fprintf(stderr, "KVS state must be initialized\n");
-    return 1;
+    return 1;  // Retorna erro se a tabela KVS não foi inicializada.
   }
 
-  // ver se a chave existe na hash com  a read-pair
+  // Verifica se a chave existe na tabela chamando 'read_pair'.
   char* value = read_pair(kvs_table, key);
   if (value == NULL) {
-    return 1;
+    return 1;  // Retorna erro se a chave não for encontrada.
   }
-  
-  int hsh = hash(key); 
+
+  int hsh = hash(key);  // Calcula o índice da chave na tabela hash.
   KeyNode* keyNode = kvs_table->table[hsh];
   KeyNode* previousNode = NULL;
+
+  // Itera pela lista de colisão para encontrar o nó com a chave.
   while (keyNode != NULL) {
-        if (strcmp(keyNode->key, key) == 0) {
-            // adicionar o fd a lista de notificacoes
-            for(int i = 0; i < MAX_SESSION_COUNT; i++) {
-              if (keyNode->notifications[i] == notif_fd){
-                fprintf(stderr, "Fd already subscribed!\n");
-                return 1;
-              }
-            }
+    if (strcmp(keyNode->key, key) == 0) {
+      // Verifica se o 'notif_fd' já está na lista de notificações.
+      for (int i = 0; i < MAX_SESSION_COUNT; i++) {
+        if (keyNode->notifications[i] == notif_fd) {
+          fprintf(stderr, "Fd already subscribed!\n");
+          return 1;  // Retorna erro se o `notif_fd` já está inscrito.
+        }
+      }
 
-            for(int i = 0; i < MAX_SESSION_COUNT; i++) {
-              if (keyNode->notifications[i] == -3) {
-                keyNode->notifications[i] = notif_fd;
-                return 0;
-              }    
-            }
-            fprintf(stderr, "No avaiable slot for notifications\n");
-            return 1;
-          }  
-      previousNode = keyNode;
-      keyNode = previousNode->next; // Move to the next node
+      // Encontra o primeiro slot disponível para adicionar o 'notif_fd'.
+      for (int i = 0; i < MAX_SESSION_COUNT; i++) {
+        if (keyNode->notifications[i] == -3) {  // Slot disponível.
+          keyNode->notifications[i] = notif_fd;
+          return 0;  // Sucesso na inscrição.
+        }
+      }
+      fprintf(stderr, "No available slot for notifications\n");
+      return 1;  // Retorna erro se não houver espaço para mais notificações.
     }
+    previousNode = keyNode;
+    keyNode = previousNode->next;  // Move para o próximo nó na lista.
+  }
 
-    return 1;
-  // colocar o fd na lista da chave (se a chave existir)
+  return 1;  // Retorna erro se a chave não for encontrada na tabela hash.
 }
 
 int kvs_unsubscription(const char* key, int notif_fd) {
   if (kvs_table == NULL) {
     fprintf(stderr, "KVS state must be initialized\n");
-    return 1;
+    return 1;  // Retorna erro se a tabela KVS não foi inicializada.
   }
 
-  // ver se a chave existe na hash com  a read-pair
+  // Verifica se a chave existe na tabela chamando 'read_pair'.
   char* value = read_pair(kvs_table, key);
   if (value == NULL) {
     return 1;
   }
-  
-  int hsh = hash(key); 
+
+  int hsh = hash(key);  // Calcula o índice da chave na tabela hash.
   KeyNode* keyNode = kvs_table->table[hsh];
   KeyNode* previousNode = NULL;
+
+  // Itera pela lista de colisão para encontrar o nó com a chave.
   while (keyNode != NULL) {
-        if (strcmp(keyNode->key, key) == 0) {
-            for(int i = 0; i < MAX_SESSION_COUNT; i++) {
-              if (keyNode->notifications[i] == notif_fd) {
-                keyNode->notifications[i] = -3;
-                return 0;
-              }
-            }
-          }  
-      previousNode = keyNode;
-      keyNode = previousNode->next; // Move to the next node
+    if (strcmp(keyNode->key, key) == 0) {
+      // Procura pelo 'notif_fd' na lista de notificações e remove-o.
+      for (int i = 0; i < MAX_SESSION_COUNT; i++) {
+        if (keyNode->notifications[i] == notif_fd) {
+          keyNode->notifications[i] = -3; // Marca o slot como disponível.
+          return 0; // Sucesso na remoção da inscrição.
+        }
+      }
     }
-  return 1;
+    previousNode = keyNode;
+    keyNode = previousNode->next;  // Move para o próximo nó na lista.
+  }
+  return 1; // Retorna erro se a chave ou o 'notif_fd' não forem encontrados.
 }
 
 int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
@@ -144,7 +147,7 @@ int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {
 
   write_str(fd, "[");
   for (size_t i = 0; i < num_pairs; i++) {
-    char *result = read_pair(kvs_table, keys[i]);
+    char* result = read_pair(kvs_table, keys[i]);
     char aux[MAX_STRING_SIZE];
     if (result == NULL) {
       snprintf(aux, MAX_STRING_SIZE, "(%s,KVSERROR)", keys[i]);
@@ -198,23 +201,21 @@ void kvs_show(int fd) {
   char aux[MAX_STRING_SIZE];
 
   for (int i = 0; i < TABLE_SIZE; i++) {
-    KeyNode *keyNode = kvs_table->table[i]; // Get the next list head
+    KeyNode* keyNode = kvs_table->table[i];  // Get the next list head
     while (keyNode != NULL) {
-      snprintf(aux, MAX_STRING_SIZE, "(%s, %s)\n", keyNode->key,
-               keyNode->value);
+      snprintf(aux, MAX_STRING_SIZE, "(%s, %s)\n", keyNode->key, keyNode->value);
       write_str(fd, aux);
-      keyNode = keyNode->next; // Move to the next node of the list
+      keyNode = keyNode->next;  // Move to the next node of the list
     }
   }
 
   pthread_rwlock_unlock(&kvs_table->tablelock);
 }
 
-int kvs_backup(size_t num_backup, char *job_filename, char *directory) {
+int kvs_backup(size_t num_backup, char* job_filename, char* directory) {
   pid_t pid;
   char bck_name[50];
-  snprintf(bck_name, sizeof(bck_name), "%s/%s-%ld.bck", directory,
-           strtok(job_filename, "."), num_backup);
+  snprintf(bck_name, sizeof(bck_name), "%s/%s-%ld.bck", directory, strtok(job_filename, "."), num_backup);
 
   pthread_rwlock_rdlock(&kvs_table->tablelock);
   pid = fork();
@@ -224,23 +225,19 @@ int kvs_backup(size_t num_backup, char *job_filename, char *directory) {
     // fork happens in a multi thread context (see man fork)
     int fd = open(bck_name, O_WRONLY | O_CREAT | O_TRUNC, 0666);
     for (int i = 0; i < TABLE_SIZE; i++) {
-      KeyNode *keyNode = kvs_table->table[i]; // Get the next list head
+      KeyNode* keyNode = kvs_table->table[i];  // Get the next list head
       while (keyNode != NULL) {
         char aux[MAX_STRING_SIZE];
         aux[0] = '(';
-        size_t num_bytes_copied = 1; // the "("
+        size_t num_bytes_copied = 1;  // the "("
         // the - 1 are all to leave space for the '/0'
-        num_bytes_copied += strn_memcpy(aux + num_bytes_copied, keyNode->key,
-                                        MAX_STRING_SIZE - num_bytes_copied - 1);
-        num_bytes_copied += strn_memcpy(aux + num_bytes_copied, ", ",
-                                        MAX_STRING_SIZE - num_bytes_copied - 1);
-        num_bytes_copied += strn_memcpy(aux + num_bytes_copied, keyNode->value,
-                                        MAX_STRING_SIZE - num_bytes_copied - 1);
-        num_bytes_copied += strn_memcpy(aux + num_bytes_copied, ")\n",
-                                        MAX_STRING_SIZE - num_bytes_copied - 1);
+        num_bytes_copied += strn_memcpy(aux + num_bytes_copied, keyNode->key, MAX_STRING_SIZE - num_bytes_copied - 1);
+        num_bytes_copied += strn_memcpy(aux + num_bytes_copied, ", ", MAX_STRING_SIZE - num_bytes_copied - 1);
+        num_bytes_copied += strn_memcpy(aux + num_bytes_copied, keyNode->value, MAX_STRING_SIZE - num_bytes_copied - 1);
+        num_bytes_copied += strn_memcpy(aux + num_bytes_copied, ")\n", MAX_STRING_SIZE - num_bytes_copied - 1);
         aux[num_bytes_copied] = '\0';
         write_str(fd, aux);
-        keyNode = keyNode->next; // Move to the next node of the list
+        keyNode = keyNode->next;  // Move to the next node of the list
       }
     }
     exit(1);
@@ -254,5 +251,3 @@ void kvs_wait(unsigned int delay_ms) {
   struct timespec delay = delay_to_timespec(delay_ms);
   nanosleep(&delay, NULL);
 }
-
-

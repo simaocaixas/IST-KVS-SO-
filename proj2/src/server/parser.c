@@ -23,7 +23,7 @@ static int read_string(int fd, char *buffer, size_t max) {
     bytes_read = read(fd, &ch, 1);
 
     if (bytes_read <= 0) {
-        return -1;
+      return -1;
     }
 
     if (ch == ' ') {
@@ -33,12 +33,10 @@ static int read_string(int fd, char *buffer, size_t max) {
     if (ch == ',') {
       value = 0;
       break;
-    }
-    else if (ch == ')') {
+    } else if (ch == ')') {
       value = 1;
       break;
-    }
-    else if (ch == ']') {
+    } else if (ch == ']') {
       value = 2;
       break;
     }
@@ -200,7 +198,8 @@ int parse_pair(int fd, char *key, char *value) {
   return 1;
 }
 
-size_t parse_write(int fd, char keys[][MAX_STRING_SIZE], char values[][MAX_STRING_SIZE], size_t max_pairs, size_t max_string_size) {
+size_t parse_write(int fd, char keys[][MAX_STRING_SIZE], char values[][MAX_STRING_SIZE], size_t max_pairs,
+                   size_t max_string_size) {
   char ch;
 
   if (read(fd, &ch, 1) != 1 || ch != '[') {
@@ -217,7 +216,7 @@ size_t parse_write(int fd, char keys[][MAX_STRING_SIZE], char values[][MAX_STRIN
   char key[max_string_size];
   char value[max_string_size];
   while (num_pairs < max_pairs) {
-    if(parse_pair(fd, key, value) == 0) {
+    if (parse_pair(fd, key, value) == 0) {
       cleanup(fd);
       return 0;
     }
@@ -260,14 +259,14 @@ size_t parse_read_delete(int fd, char keys[][MAX_STRING_SIZE], size_t max_keys, 
   char key[max_string_size];
   while (num_keys < max_keys) {
     int output = read_string(fd, key, max_string_size);
-    if(output < 0 || output == 1) {
+    if (output < 0 || output == 1) {
       cleanup(fd);
       return 0;
     }
 
     strcpy(keys[num_keys++], key);
 
-    if (output == 2){
+    if (output == 2) {
       break;
     }
   }

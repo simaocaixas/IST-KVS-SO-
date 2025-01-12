@@ -1,131 +1,131 @@
-#include <unistd.h>
 #include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <signal.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <stdio.h>
-#include <sys/stat.h>
-#include <errno.h>
-#include <signal.h>
+#include <unistd.h>
 
-#include "src/server/constants.h"
+#include "io.h"
+#include "kvs.h"
+#include "operations.h"
+#include "parser.h"
+#include "pthread.h"
+#include "semaphore.h"
 #include "src/common/constants.h"
 #include "src/common/protocol.h"
-#include "parser.h"
-#include "operations.h"
-#include "io.h"
-#include "pthread.h"
-#include "kvs.h"
-#include "semaphore.h"
+#include "src/server/constants.h"
 
-int write_server_flag = 0;
-int sig_flag = 0;
-int read_index = 0;
-int write_index = 0;
-sem_t empty;
-sem_t full;
-pthread_mutex_t semExMut = PTHREAD_MUTEX_INITIALIZER;
-sem_t consumed;  // Declare no início do arquivo com os outros semáforos
+int write_server_flag = 0;  // Flag de controlo para indicar se o servidor está pronto para escrever
+int sig_flag = 0;  // Flag para o sinal SIGUSR1
+int read_index = 0;  // Índice de leitura no buffer
+int write_index = 0;  // Índice de escrita no buffer
+sem_t empty;  // Semáforo para indicar espaços vazios no buffer
+sem_t full;  // Semáforo para indicar espaços preenchidos no buffer
+pthread_mutex_t semExMut = PTHREAD_MUTEX_INITIALIZER;  // Mutex para exclusão mútua no controlo de semáforos
+sem_t consumed;  // Semáforo para indicar que os dados foram consumidos
+
+
 struct SharedData {
-  DIR* dir;
-  char* dir_name;
+  DIR* dir;  
+  char* dir_name;  
   pthread_mutex_t directory_mutex;
 };
 
-typedef struct {
+// Estrutura para representar um cliente
+typedef struct Client {
   int client_req_fd;
-  int client_resp_fd; 
-  int client_notif_fd;
-  KeySubNode *subscriptions;
+  int client_resp_fd;  
+  int client_notif_fd;  
+  KeySubNode* subscriptions;
 } Client;
 
-Client *client_server_buffer[MAX_SESSION_COUNT];
-Client *clients_list[MAX_SESSION_COUNT];
+// Buffers para armazenar os clientes
+Client* client_server_buffer[MAX_SESSION_COUNT];  // Buffer de clientes a serem servidos
+Client* clients_list[MAX_SESSION_COUNT];  // Lista de clientes conectados
 
-typedef struct PipeData {
-  pthread_t thread;
-  Client client;
-} PipeData;
-
-int key_insert(KeySubNode **head, const char* key) {
-  KeySubNode *new_node = (KeySubNode*)malloc(sizeof(KeySubNode));
+// Função para inserir uma chave na lista de subscrições
+int key_insert(KeySubNode** head, const char* key) {
+  KeySubNode* new_node = (KeySubNode*)malloc(sizeof(KeySubNode));  // Criação de um novo nó
   if (new_node == NULL) {
     perror("Failed to create key node!");
     return 1;
-  } 
+  }
 
-  new_node->key = strdup(key);
-  if(new_node->key == NULL) {
+  new_node->key = strdup(key);  // Copia da chave para o nó
+  if (new_node->key == NULL) {
     free(new_node);
     return 1;
   }
 
-  new_node->next = NULL;
+  new_node->next = NULL;  // Atribuição do próximo nó como NULL
 
-  if(*head == NULL) {
-    *head = new_node;
+  if (*head == NULL) {
+    *head = new_node;  // Se a lista estiver vazia, o novo nó será o primeiro
   } else {
-    new_node->next = *head; //inserção a esquerda
-    *head = new_node;
+    new_node->next = *head;  // Inserção a esquerda na lista
+    *head = new_node;  // O novo nó é agora o primeiro da lista
   }
 
   return 0;
 }
 
+// Função para tratar sinais (SIGUSR1)
 void sig_handle() {
-  sig_flag = 1;
-  if (signal(SIGUSR1,sig_handle) == SIG_ERR) {
+  sig_flag = 1;  // Altera a flag de sinal
+  if (signal(SIGUSR1, sig_handle) == SIG_ERR) {  // Volta a registar o manipulador do sinal
     perror("signal could not be resolved\n");
     exit(EXIT_FAILURE);
   }
 }
 
-int key_delete(KeySubNode **head, const char* key) {
-  if (head == NULL || key == NULL) return 1;
+// Função para eliminar uma chave da lista de subscrições
+int key_delete(KeySubNode** head, const char* key) {
+  if (head == NULL || key == NULL) return 1;  // Verifica se os parâmetros são válidos
 
-  KeySubNode *current = *head, *previous = NULL;
-  while(current != NULL) {
-    if(strcmp(current->key, key) == 0) {
+  KeySubNode *current = *head, *previous = NULL;  // Ponteiros para percorrer a lista
+  while (current != NULL) {
+    if (strcmp(current->key, key) == 0) {  // Verifica se a chave foi encontrada
       if (previous == NULL) {
-        *head = current->next;
+        *head = current->next;  // Se for o primeiro nó, atualiza o head da lista
         free(current->key);
         free(current);
         return 0;
       } else {
-        previous->next = current->next;
+        previous->next = current->next;  // Se não for o primeiro, ajusta o ponteiro do anterior
         free(current->key);
         free(current);
-        return 0; 
+        return 0;
       }
     }
     previous = current;
     current = current->next;
   }
 
-  return 1;
+  return 1;  // Caso a chave não seja encontrada
 }
-
-// we have a list of clients: [client1_req_fd, client1_resp_fd, client1_notif_fd], [client2_req_fd, client2_resp_fd, client2_notif_fd], ...]
 
 pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t n_current_backups_lock = PTHREAD_MUTEX_INITIALIZER;
 
-size_t active_backups = 0;     // Number of active backups
-size_t max_backups;            // Maximum allowed simultaneous backups
-size_t max_threads;            // Maximum allowed simultaneous threads
+size_t active_backups = 0;  // Number of active backups
+size_t max_backups;         // Maximum allowed simultaneous backups
+size_t max_threads;         // Maximum allowed simultaneous threads
 char* jobs_directory = NULL;
 char* fifo_server;
-char server_pipe_path[256] = "/tmp/server";
+char server_pipe_path[256] = "/tmp/server033";
 
 int filter_job_files(const struct dirent* entry) {
-    const char* dot = strrchr(entry->d_name, '.');
-    if (dot != NULL && strcmp(dot, ".job") == 0) {
-        return 1;  // Keep this file (it has the .job extension)
-    }
-    return 0;
+  const char* dot = strrchr(entry->d_name, '.');
+  if (dot != NULL && strcmp(dot, ".job") == 0) {
+    return 1;  // Keep this file (it has the .job extension)
+  }
+  return 0;
 }
 
 static int entry_files(const char* dir, struct dirent* entry, char* in_path, char* out_path) {
@@ -195,22 +195,24 @@ static int run_job(int in_fd, int out_fd, char* filename) {
           write_str(STDERR_FILENO, "Failed to delete pair\n");
         }
 
+        // Iterar sobre todos os pares de chaves
         for (size_t i = 0; i < num_pairs; i++) {
-            char* key = keys[i];
-            for (int j = 0; j < MAX_SESSION_COUNT; j++) {
-                if (clients_list[j] != NULL) {  // Verificar se o cliente existe
-                    KeySubNode* current = clients_list[j]->subscriptions;
-                    while (current != NULL) {
-                        if (strcmp(current->key, key) == 0) {  // Comparar strings em vez de ponteiros
-                            key_delete(&(clients_list[j]->subscriptions), key);
-                            break;
-                        }
-                        current = current->next;
-                    }
+          char* key = keys[i];  // Obter a chave atual
+          // Iterar sobre todos os clientes na lista
+          for (int j = 0; j < MAX_SESSION_COUNT; j++) {
+            if (clients_list[j] != NULL) {  // Verificar se o cliente existe
+              KeySubNode* current = clients_list[j]->subscriptions;  // Iniciar a iteração sobre as subscrições do cliente
+              // Iterar sobre as subscrições do cliente
+              while (current != NULL) {
+                if (strcmp(current->key, key) == 0) {  // Comparar as strings das chaves (não os ponteiros)
+                  key_delete(&(clients_list[j]->subscriptions), key);  // Eliminar a chave da lista de subscrições do cliente
+                  break;  // Sair do loop após a remoção da chave
                 }
+                current = current->next;  // Passar para a próxima subscrição
+              }
             }
+          }
         }
-
         break;
 
       case CMD_SHOW:
@@ -240,7 +242,7 @@ static int run_job(int in_fd, int out_fd, char* filename) {
         int aux = kvs_backup(++file_backups, filename, jobs_directory);
 
         if (aux < 0) {
-            write_str(STDERR_FILENO, "Failed to do backup\n");
+          write_str(STDERR_FILENO, "Failed to do backup\n");
         } else if (aux == 1) {
           return 1;
         }
@@ -252,14 +254,14 @@ static int run_job(int in_fd, int out_fd, char* filename) {
 
       case CMD_HELP:
         write_str(STDOUT_FILENO,
-            "Available commands:\n"
-            "  WRITE [(key,value)(key2,value2),...]\n"
-            "  READ [key,key2,...]\n"
-            "  DELETE [key,key2,...]\n"
-            "  SHOW\n"
-            "  WAIT <delay_ms>\n"
-            "  BACKUP\n"
-            "  HELP\n");
+                  "Available commands:\n"
+                  "  WRITE [(key,value)(key2,value2),...]\n"
+                  "  READ [key,key2,...]\n"
+                  "  DELETE [key,key2,...]\n"
+                  "  SHOW\n"
+                  "  WAIT <delay_ms>\n"
+                  "  BACKUP\n"
+                  "  HELP\n");
 
         break;
 
@@ -273,16 +275,20 @@ static int run_job(int in_fd, int out_fd, char* filename) {
   }
 }
 
-//frees arguments
+// frees arguments
 static void* get_file(void* arguments) {
-
+  
+  // Definir um conjunto de sinais a ser bloqueado
   sigset_t set;
-  sigemptyset(&set);
-  sigaddset(&set, SIGUSR1);
-  sigaddset(&set, SIGPIPE);
-  pthread_sigmask(SIG_BLOCK, &set, NULL);
+  sigemptyset(&set);  // Inicializa o conjunto de sinais com nenhum sinal
+  sigaddset(&set, SIGUSR1);  // Adiciona SIGUSR1 ao conjunto de sinais
+  sigaddset(&set, SIGPIPE);   // Adiciona SIGPIPE ao conjunto de sinais
 
-  struct SharedData* thread_data = (struct SharedData*) arguments;
+  // Bloquear os sinais definidos no conjunto
+  pthread_sigmask(SIG_BLOCK, &set, NULL);  // Bloqueia os sinais especificados no conjunto 'set' para a thread atual
+
+
+  struct SharedData* thread_data = (struct SharedData*)arguments;  //codigo do esqueleto (não comentado)
   DIR* dir = thread_data->dir;
   char* dir_name = thread_data->dir_name;
 
@@ -347,288 +353,339 @@ static void* get_file(void* arguments) {
   pthread_exit(NULL);
 }
 
-int client_sudden_disconnect(Client *client){
-  
-  int client_req_fd = client->client_req_fd; // we (server) will write to this
-  int client_resp_fd = client->client_resp_fd; // we will read from this
-  int client_notif_fd = client->client_notif_fd; 
-  
+// Função para lidar com desconexão súbita de um cliente
+int client_sudden_disconnect(Client* client) {
+  int client_req_fd = client->client_req_fd;    
+  int client_resp_fd = client->client_resp_fd;
+  int client_notif_fd = client->client_notif_fd;
+
+  // Verificar se os FDs dos pipes são válidos
   if (client_req_fd < 0 || client_resp_fd < 0 || client_notif_fd < 0) {
-    return 0;
+    return 0;  // Retornar 0 se algum pipe não for válido
   }
 
-  KeySubNode *current = client->subscriptions;
-  KeySubNode *next;
+  // Percorrer a lista de subscrições do cliente e tentar cancelar todas as subscrições
+  KeySubNode* current = client->subscriptions;
+  KeySubNode* next;
 
   while (current != NULL) {
     next = current->next;
+
+    // Tentar cancelar a subscrição do cliente para a chave atual
     if (kvs_unsubscription(current->key, client->client_notif_fd) != 0) {
-      fprintf(stderr, "Failed to unsubscribe key: %s\n", current->key);
+      fprintf(stderr, "Falha ao cancelar subscrição da chave: %s\n", current->key);
     }
 
-    if(key_delete(&client->subscriptions, current->key) != 0) {
-      fprintf(stderr, "Failed to delete subscription from key: %s\n", current->key);
+    // Tentar eliminar a chave da lista de subscrições
+    if (key_delete(&client->subscriptions, current->key) != 0) {
+      fprintf(stderr, "Falha ao eliminar subscrição da chave: %s\n", current->key);
     }
-    current = next;
+
+    current = next;  // Avançar para a próxima subscrição
   }
 
+  // Remover o cliente da lista de clientes
   for (int i = 0; i < MAX_SESSION_COUNT; i++) {
-    if(clients_list[i] == client) {
-      clients_list[i] = NULL;
-      free(client);
+    if (clients_list[i] == client) {
+      clients_list[i] = NULL;  // Definir a posição do cliente como NULL
+      free(client);  // Libertar a memória associada ao cliente
       break;
     }
   }
 
-  close(client_req_fd); close(client_resp_fd); close(client_notif_fd);
+  // Fechar os FDs dos pipes do cliente
+  close(client_req_fd);
+  close(client_resp_fd);
+  close(client_notif_fd);
 
-  return 0;
+  return 0;  // Retornar 0 indicando que a desconexão foi processada com sucesso
 }
 
-static void* manage_clients(Client *temp_client) {
- 
- printf("[Thread %ld] Iniciada\n", pthread_self());
- 
- int client_req_fd = temp_client->client_req_fd;
- int client_resp_fd = temp_client->client_resp_fd;
- int client_notif_fd = temp_client->client_notif_fd; 
-  
- while (1) {
-   printf("[Thread %ld] Aguardando comando...\n", pthread_self());
-   char buffer[MAX_READ_SIZE];
-   ssize_t bytes_read;
-   bytes_read = read(client_req_fd, buffer, MAX_READ_SIZE); 
-   
-   if(bytes_read == -1 && errno == EPIPE) {
-      printf("DEU MERDA!!!!\n");
-      return 0;
-   }
+static void* manage_clients(Client* temp_client) {
+  printf("[Thread %ld] Iniciada\n", pthread_self());
 
-   if (bytes_read == 0) {
-      printf("[Thread %ld] Cliente desconectou abruptamente\n", pthread_self()); 
+  // Obtemos os descritores de ficheiro do cliente
+  int client_req_fd = temp_client->client_req_fd;
+  int client_resp_fd = temp_client->client_resp_fd;
+  int client_notif_fd = temp_client->client_notif_fd;
+
+  while (1) {
+    
+    printf("[Thread %ld] Aguardando comando...\n", pthread_self());
+    char buffer[MAX_READ_SIZE];
+    ssize_t bytes_read;
+
+    // Lemos o pedido do cliente
+    bytes_read = read(client_req_fd, buffer, MAX_READ_SIZE);
+
+    // Se o cliente desconectar-se
+    if (bytes_read == 0) {
+      printf("[Thread %ld] Cliente desconectou abruptamente\n", pthread_self());
       client_sudden_disconnect(temp_client);
       return 0;
     }
-   
-   
-   if (bytes_read > 0) {
-     printf("[Thread %ld] Recebido: %s\n", pthread_self(), buffer);
-       
-     int res, cleanup_success;
-     char *saveptr = NULL, answer[MAX_WRITE_SIZE];
-     char* token = strtok_r(buffer, "|", &saveptr);
-     const char* key = NULL;
 
-     switch (atoi(token)) {
-       case OP_CODE_DISCONNECT:
-         printf("[Thread %ld] Processando DISCONNECT\n", pthread_self());
-         cleanup_success = 1;
-         KeySubNode *current = temp_client->subscriptions;
-         KeySubNode *next;
+    // Se foram lidos dados do cliente
+    if (bytes_read > 0) {
+      printf("[Thread %ld] Recebido: %s\n", pthread_self(), buffer);
 
-         while (current != NULL) {
-           next = current->next;
-           printf("[Thread %ld] Removendo subscrição: %s\n", pthread_self(), current->key);
-           if (kvs_unsubscription(current->key, temp_client->client_notif_fd) != 0) {
-             fprintf(stderr, "[Thread %ld] Falha unsubscribe: %s\n", pthread_self(), current->key);
-             cleanup_success = 0;
-           }
+      int res, cleanup_success;
+      char *saveptr = NULL, answer[MAX_WRITE_SIZE];
+      char* token = strtok_r(buffer, "|", &saveptr);
+      const char* key = NULL;
 
-           if(key_delete(&temp_client->subscriptions, current->key) != 0) {
-             fprintf(stderr, "[Thread %ld] Falha remover chave: %s\n", pthread_self(), current->key);
-             cleanup_success = 0;
-           }
-           current = next;
-         }
+      // Processa o comando baseado no código de operação
+      switch (atoi(token)) {
+        case OP_CODE_DISCONNECT:
+          printf("[Thread %ld] Processando DISCONNECT\n", pthread_self());
+          cleanup_success = 1;
 
-         snprintf(answer, MAX_WRITE_SIZE, "%d|%d", OP_CODE_DISCONNECT, cleanup_success ? 0 : 1);
-         printf("[Thread %ld] Enviando resposta: %s\n", pthread_self(), answer);
+          KeySubNode* current = temp_client->subscriptions;
+          KeySubNode* next;
 
-         if(write(client_resp_fd, answer, strlen(answer)) == -1) {
-            if (errno == EPIPE) {
-              fprintf(stderr, "[Thread %ld] Houve um Kill, Epipe foi lancado\n", pthread_self());
-              return 0;
+          // Remove todas as subscrições do cliente
+          while (current != NULL) {
+            next = current->next;
+            printf("[Thread %ld] Removendo subscrição: %s\n", pthread_self(), current->key);
+            if (kvs_unsubscription(current->key, temp_client->client_notif_fd) != 0) {
+              fprintf(stderr, "[Thread %ld] Falha unsubscribe: %s\n", pthread_self(), current->key);
+              cleanup_success = 0;
             }
 
-           fprintf(stderr, "[Thread %ld] Falha enviar resposta disconnect\n", pthread_self());
-           return 0;
-         }
-         
-         for (int i = 0; i < MAX_SESSION_COUNT; i++) {
-          if(clients_list[i] == temp_client) {
-            clients_list[i] = NULL;
-            free(temp_client);
-            break;
+            if (key_delete(&temp_client->subscriptions, current->key) != 0) {
+              fprintf(stderr, "[Thread %ld] Falha remover chave: %s\n", pthread_self(), current->key);
+              cleanup_success = 0;
+            }
+            current = next;
           }
-         }
-         
-         printf("[Thread %ld] Fechando conexão\n", pthread_self());
-         close(client_req_fd); 
-         close(client_resp_fd); 
-         close(client_notif_fd);
-         return 0;
-         
-       case OP_CODE_SUBSCRIBE:
-         key = strtok_r(NULL, "|", &saveptr);
-         printf("[Thread %ld] Processando SUBSCRIBE: %s\n", pthread_self(), key);
-         
-         res = kvs_subscription(key, client_notif_fd);
-         printf("[Thread %ld] kvs_subscription retornou: %d\n", pthread_self(), res);
 
-         if(res == 0) {
-           if(key_insert(&temp_client->subscriptions, key) != 0) {
-             fprintf(stderr, "[Thread %ld] Falha inserir chave\n", pthread_self());
-             return 0;
-           }
-           snprintf(answer, MAX_WRITE_SIZE, "%d|1", OP_CODE_SUBSCRIBE);
-         } else {
-           snprintf(answer, MAX_WRITE_SIZE, "%d|0", OP_CODE_SUBSCRIBE);
-         }
+          // Envia a resposta ao cliente
+          snprintf(answer, MAX_WRITE_SIZE, "%d|%d", OP_CODE_DISCONNECT, cleanup_success ? 0 : 1);
+          printf("[Thread %ld] Enviando resposta: %s\n", pthread_self(), answer);
 
-         printf("[Thread %ld] Enviando resposta: %s\n", pthread_self(), answer);
-         if(write(client_resp_fd, answer, strlen(answer)) == -1) {
+          if (write(client_resp_fd, answer, strlen(answer)) == -1) {
             if (errno == EPIPE) {
               fprintf(stderr, "[Thread %ld] Houve um Kill, Epipe foi lancado\n", pthread_self());
               return 0;
             }
 
-           fprintf(stderr, "[Thread %ld] Falha enviar resposta subscribe\n", pthread_self());
-           return 0;
-         }
+            fprintf(stderr, "[Thread %ld] Falha enviar resposta disconnect\n", pthread_self());
+            return 0;
+          }
 
+          // Remover o cliente da lista de clientes
           for (int i = 0; i < MAX_SESSION_COUNT; i++) {
-            if (clients_list[i] == NULL) {
-                printf("Client[%d]: NULL\n", i);
-                continue;
+            if (clients_list[i] == temp_client) {
+              clients_list[i] = NULL;
+              free(temp_client);
+              break;
             }
-            
-            printf("Client[%d]:\n", i);
-            printf("  Request FD: %d\n", clients_list[i]->client_req_fd);
-            printf("  Response FD: %d\n", clients_list[i]->client_resp_fd);
-            printf("  Notification FD: %d\n", clients_list[i]->client_notif_fd);
-            
-            // Imprimir as subscrições
-            printf("  Subscriptions: ");
-            KeySubNode *current2 = clients_list[i]->subscriptions;
-            if (current2 == NULL) {
-                printf("None\n");
-            } else {
-                printf("\n");
-                while (current2 != NULL) {
-                    printf("    - Key: %s\n", current2->key);
-                    current2 = current2->next;
-                }
-            }
-            printf("\n");
           }
 
-         break;
+          // Fechar as conexões com o cliente
+          printf("[Thread %ld] Fechando conexão\n", pthread_self());
+          close(client_req_fd);
+          close(client_resp_fd);
+          close(client_notif_fd);
+          return 0;
 
-       case OP_CODE_UNSUBSCRIBE:
-         key = strtok_r(NULL, "|", &saveptr);
-         printf("[Thread %ld] Processando UNSUBSCRIBE: %s\n", pthread_self(), key);
+        case OP_CODE_SUBSCRIBE:
 
-         res = kvs_unsubscription(key, client_notif_fd);
-         printf("[Thread %ld] kvs_unsubscription retornou: %d\n", pthread_self(), res);
+          // Processamento do comando de subscrição
+          key = strtok_r(NULL, "|", &saveptr);
+          printf("[Thread %ld] Processando SUBSCRIBE: %s\n", pthread_self(), key);
 
-         if(res == 0) {
-           if(key_delete(&temp_client->subscriptions, key) != 0) {
-             fprintf(stderr, "[Thread %ld] Falha remover chave\n", pthread_self());
-             return 0;
-           }
-           snprintf(answer, MAX_WRITE_SIZE, "%d|0", OP_CODE_UNSUBSCRIBE);
-         } else {
-           snprintf(answer, MAX_WRITE_SIZE, "%d|1", OP_CODE_UNSUBSCRIBE);
-         }
+          res = kvs_subscription(key, client_notif_fd);
+          printf("[Thread %ld] kvs_subscription retornou: %d\n", pthread_self(), res);
 
-         printf("[Thread %ld] Enviando resposta: %s\n", pthread_self(), answer);
-         if(write(client_resp_fd, answer, strlen(answer)) == -1) {
+          // Resposta sobre a subscrição
+          if (res == 0) {
+            if (key_insert(&temp_client->subscriptions, key) != 0) {
+              fprintf(stderr, "[Thread %ld] Falha inserir chave\n", pthread_self());
+              return 0;
+            }
+            snprintf(answer, MAX_WRITE_SIZE, "%d|1", OP_CODE_SUBSCRIBE);
+          } else {
+            snprintf(answer, MAX_WRITE_SIZE, "%d|0", OP_CODE_SUBSCRIBE);
+          }
+
+          printf("[Thread %ld] Enviando resposta: %s\n", pthread_self(), answer);
+          if (write(client_resp_fd, answer, strlen(answer)) == -1) {
             if (errno == EPIPE) {
               fprintf(stderr, "[Thread %ld] Houve um Kill, Epipe foi lancado\n", pthread_self());
               return 0;
-          }
-
-           fprintf(stderr, "[Thread %ld] Falha enviar resposta unsubscribe\n", pthread_self());
-           return 0;
-         }
-
-          for (int i = 0; i < MAX_SESSION_COUNT; i++) {
-            if (clients_list[i] == NULL) {
-                printf("Client[%d]: NULL\n", i);
-                continue;
             }
-            
-            printf("Client[%d]:\n", i);
-            printf("  Request FD: %d\n", clients_list[i]->client_req_fd);
-            printf("  Response FD: %d\n", clients_list[i]->client_resp_fd);
-            printf("  Notification FD: %d\n", clients_list[i]->client_notif_fd);
-            
-            // Imprimir as subscrições
-            printf("  Subscriptions: ");
-            KeySubNode *current3 = clients_list[i]->subscriptions;
-            if (current3 == NULL) {
-                printf("None\n");
-            } else {
-                printf("\n");
-                while (current3 != NULL) {
-                    printf("    - Key: %s\n", current3->key);
-                    current3 = current3->next;
-                }
-            }
-            printf("\n");
+
+            fprintf(stderr, "[Thread %ld] Falha enviar resposta subscribe\n", pthread_self());
+            return 0;
           }
           
-         break;
+          // Exemplo de impressão de clientes e suas subscrições
+          for (int i = 0; i < MAX_SESSION_COUNT; i++) {
+            if (clients_list[i] == NULL) {
+              printf("Client[%d]: NULL\n", i);
+              continue;
+            }
 
-       default:
-         fprintf(stderr, "[Thread %ld] Opcode inválido\n", pthread_self());
-         break;
-     }
-   }
- }
- return 0;
+            printf("Client[%d]:\n", i);
+            printf("  Request FD: %d\n", clients_list[i]->client_req_fd);
+            printf("  Response FD: %d\n", clients_list[i]->client_resp_fd);
+            printf("  Notification FD: %d\n", clients_list[i]->client_notif_fd);
+
+            // Imprimir as subscrições
+            printf("  Subscriptions: ");
+            KeySubNode* current2 = clients_list[i]->subscriptions;
+            if (current2 == NULL) {
+              printf("None\n");
+            } else {
+              printf("\n");
+              while (current2 != NULL) {
+                printf("    - Key: %s\n", current2->key);
+                current2 = current2->next;
+              }
+            }
+            printf("\n");
+          }
+
+          break;
+
+        case OP_CODE_UNSUBSCRIBE:
+          // Processamento do comando de desinscrição
+          key = strtok_r(NULL, "|", &saveptr);
+          printf("[Thread %ld] Processando UNSUBSCRIBE: %s\n", pthread_self(), key);
+
+          res = kvs_unsubscription(key, client_notif_fd);
+          printf("[Thread %ld] kvs_unsubscription retornou: %d\n", pthread_self(), res);
+
+          // Resposta sobre a desinscrição
+          if (res == 0) {
+            if (key_delete(&temp_client->subscriptions, key) != 0) {
+              fprintf(stderr, "[Thread %ld] Falha remover chave\n", pthread_self());
+              return 0;
+            }
+            snprintf(answer, MAX_WRITE_SIZE, "%d|0", OP_CODE_UNSUBSCRIBE);
+          } else {
+            snprintf(answer, MAX_WRITE_SIZE, "%d|1", OP_CODE_UNSUBSCRIBE);
+          }
+
+          printf("[Thread %ld] Enviando resposta: %s\n", pthread_self(), answer);
+          if (write(client_resp_fd, answer, strlen(answer)) == -1) {
+            if (errno == EPIPE) {
+              fprintf(stderr, "[Thread %ld] Houve um Kill, Epipe foi lancado\n", pthread_self());
+              return 0;
+            }
+
+            fprintf(stderr, "[Thread %ld] Falha enviar resposta unsubscribe\n", pthread_self());
+            return 0;
+          }
+
+          // Exemplo de impressão de clientes e suas subscrições
+          for (int i = 0; i < MAX_SESSION_COUNT; i++) {
+            if (clients_list[i] == NULL) {
+              printf("Client[%d]: NULL\n", i);
+              continue;
+            }
+
+            printf("Client[%d]:\n", i);
+            printf("  Request FD: %d\n", clients_list[i]->client_req_fd);
+            printf("  Response FD: %d\n", clients_list[i]->client_resp_fd);
+            printf("  Notification FD: %d\n", clients_list[i]->client_notif_fd);
+
+            // Imprimir as subscrições
+            printf("  Subscriptions: ");
+            KeySubNode* current3 = clients_list[i]->subscriptions;
+            if (current3 == NULL) {
+              printf("None\n");
+            } else {
+              printf("\n");
+              while (current3 != NULL) {
+                printf("    - Key: %s\n", current3->key);
+                current3 = current3->next;
+              }
+            }
+            printf("\n");
+          }
+
+          break;
+
+        default:
+          fprintf(stderr, "[Thread %ld] Opcode inválido\n", pthread_self());
+          break;
+      }
+    }
+  }
+  return 0;
 }
 
-
 void consume() {
+  // Espera por um item disponível (não vazio) no buffer
   sem_wait(&full);
+
+  // Bloqueia o mutex para acessar de forma segura o índice e o buffer
   pthread_mutex_lock(&semExMut);
+
+  // Lê o cliente presente na posição 'read_index' no buffer
   Client* C = client_server_buffer[read_index];
+  // Atualiza o índice de leitura (circular)
   read_index = (read_index + 1) % MAX_SESSION_COUNT;
+
+  // Liberta o mutex após atualizar o índice
   pthread_mutex_unlock(&semExMut);
+
+  // Liberta o semáforo que indica que o buffer tem espaço para mais itens
   sem_post(&empty);
+  
+  // Indica que o item foi consumido
   sem_post(&consumed);
+
+  // Processa o cliente lido (chama a função para gerenciar o cliente)
   manage_clients(C);
 }
 
-void produce(Client *c) {
+void produce(Client* c) {
+  // Espera por um espaço disponível (não cheio) no buffer
   sem_wait(&empty);
+
+  // Bloqueia o mutex para acessar de forma segura o índice e o buffer
   pthread_mutex_lock(&semExMut);
+
+  // Adiciona o cliente à posição 'write_index' no buffer
   client_server_buffer[write_index] = c;
+  // Atualiza o índice de escrita (circular)
   write_index = (write_index + 1) % MAX_SESSION_COUNT;
+
+  // Liberta o mutex após atualizar o índice
   pthread_mutex_unlock(&semExMut);
+
+  // Liberta o semáforo que indica que o buffer tem itens disponíveis para consumir
   sem_post(&full);
+
+  // Espera até que o item seja consumido
   sem_wait(&consumed);
 }
 
 void* clients_loop() {
-
+  // Define o conjunto de sinais a bloquear
   sigset_t set;
   sigemptyset(&set);
-  sigaddset(&set, SIGUSR1);
-  sigaddset(&set, SIGPIPE);
+  sigaddset(&set, SIGUSR1);  // Bloqueia SIGUSR1
+  sigaddset(&set, SIGPIPE);   // Bloqueia SIGPIPE
+
+  // Bloqueia os sinais SIGUSR1 e SIGPIPE na thread atual
   pthread_sigmask(SIG_BLOCK, &set, NULL);
 
-  while(1) {
-    consume();
+  // Loop infinito para consumir os itens do buffer
+  while (1) {
+    consume();  // Chama a função 'consume' para processar o próximo cliente
   }
-} 
+}
 
 static int dispatch_threads(DIR* dir) {
+  
   pthread_t* threads = malloc(max_threads * sizeof(pthread_t));
 
   if (threads == NULL) {
-    fprintf(stderr, "Failed to allocate memory for threads\n");
+    fprintf(stderr, "Falha ao alocar memória para os threads\n");
     return 1;
   }
 
@@ -636,35 +693,39 @@ static int dispatch_threads(DIR* dir) {
   
   for (size_t i = 0; i < max_threads; i++) {
     if (pthread_create(&threads[i], NULL, get_file, (void*)&thread_data) != 0) {
-      fprintf(stderr, "Failed to create thread %zu\n", i);
+      fprintf(stderr, "Falha ao criar thread %zu\n", i);
       pthread_mutex_destroy(&thread_data.directory_mutex);
       free(threads);
       return 1;
     }
   }
 
+  // Cria threads para o loop de gestão de clientes
   pthread_t manager_threads[MAX_SESSION_COUNT];
-
-  for(int i = 0; i < MAX_SESSION_COUNT; i++) {
+  for (int i = 0; i < MAX_SESSION_COUNT; i++) {
     pthread_create(&manager_threads[i], NULL, clients_loop, NULL);
   }
 
+  // Concatena o caminho do pipe do servidor
   strncat(server_pipe_path, fifo_server, strlen(fifo_server) * sizeof(char));
 
-  if(unlink(server_pipe_path) != 0 && errno != ENOENT) {
-    fprintf(stderr, "Failed to unlink server FIFO!\n");
+  // Remove o arquivo FIFO caso já exista
+  if (unlink(server_pipe_path) != 0 && errno != ENOENT) {
+    fprintf(stderr, "Falha ao remover o FIFO do servidor!\n");
     return 1;
   }
 
-  if(mkfifo(server_pipe_path, 0640) != 0) {
-    write_str(STDERR_FILENO, "Failed to create FIFO\n");
+  // Cria o FIFO com as permissões adequadas
+  if (mkfifo(server_pipe_path, 0640) != 0) {
+    write_str(STDERR_FILENO, "Falha ao criar o FIFO\n");
     unlink(server_pipe_path);
     return 1;
   }
 
+  // Abre o FIFO para leitura
   int fifo_fd_read = open(server_pipe_path, O_RDONLY);
-  if(fifo_fd_read == -1) {
-    write_str(STDERR_FILENO, "Failed to open FIFO\n");
+  if (fifo_fd_read == -1) {
+    write_str(STDERR_FILENO, "Falha ao abrir o FIFO\n");
     return 1;
   }
 
@@ -674,92 +735,110 @@ static int dispatch_threads(DIR* dir) {
   while (1) {
     char buffer[MAX_READ_SIZE];
 
-    // Loop para mais clientes
-    if(read(fifo_fd_read, buffer, MAX_READ_SIZE) == -1) { // 1|<PipeCliente(pedidos)>|<PipeCliente(respostas)>|<PipeCliente(notificacoes)>
-      if (errno == EINTR) {
-        if (sig_flag == 1) {
-          for (int i = 0; i < MAX_SESSION_COUNT; i++) {
-            if(clients_list[i] != NULL) {
-              client_sudden_disconnect(clients_list[i]);
-            }
+    // Loop para processar mais clientes
+  if (read(fifo_fd_read, buffer, MAX_READ_SIZE) == -1) {
+    // Verifica se houve erro ao ler do FIFO, especificamente se foi causado por um sinal interrompido (EINTR)
+    if (errno == EINTR) {
+      // Se a flag de sinal (sig_flag) estiver ativada, processa a desconexão súbita dos clientes
+      if (sig_flag == 1) {
+        for (int i = 0; i < MAX_SESSION_COUNT; i++) {
+          if (clients_list[i] != NULL) {
+            client_sudden_disconnect(clients_list[i]);
           }
-          sig_flag = 0;
-          continue;
         }
-      } else {
-        write_str(STDERR_FILENO, "Error reading from FIFO\n");
+        // Reseta a flag e continua o loop
+        sig_flag = 0;
+        continue;
       }
+    } else {
+      write_str(STDERR_FILENO, "Erro ao ler do FIFO\n");
     }
-    
-    if(write_server_flag == 0) {
-      int fifo_fd_write = open(server_pipe_path, O_WRONLY);
-      if(fifo_fd_write == -1) {
-        write_str(STDERR_FILENO, "Failed to open FIFO\n");
-        return 1;
-      }
-      write_server_flag = 1;
-    } 
-      
-    char* saveptr = NULL;
-    char* token = strtok_r(buffer, "|", &saveptr);
+  }
 
-    if (token == NULL || strcmp(token, "1") != 0) {
-      write_str(STDERR_FILENO, "Invalid message\n");
+  // Verifica se o servidor já foi configurado para escrita no FIFO
+  if (write_server_flag == 0) {
+    // Tenta abrir o FIFO para escrita
+    int fifo_fd_write = open(server_pipe_path, O_WRONLY);
+    if (fifo_fd_write == -1) {
+      write_str(STDERR_FILENO, "Falha ao abrir FIFO\n");
       return 1;
     }
+    // Marca que o servidor está aberto para escrever no FIFO
+    write_server_flag = 1;
+  }
 
-    char* token1 = strtok_r(NULL, "|", &saveptr);
-    char* token2 = strtok_r(NULL, "|", &saveptr);
-    char* token3 = strtok_r(NULL, "|", &saveptr);
-    
-    Client *new_client = malloc(sizeof(Client));
-    new_client->client_resp_fd = open(token2, O_WRONLY);
-    new_client->client_notif_fd = open(token3, O_WRONLY);
-    new_client->client_req_fd = open(token1, O_RDONLY);
-    new_client->subscriptions = NULL;
+  // Processamento da mensagem recebida no buffer
+  char* saveptr = NULL;
+  char* token = strtok_r(buffer, "|", &saveptr);
 
-    char answer[MAX_WRITE_SIZE];
-    snprintf(answer, MAX_WRITE_SIZE, "%d|0", OP_CODE_CONNECT);
-    
-    produce(new_client);
-    if(write(new_client->client_resp_fd, answer, strlen(answer)) == -1) {
-      fprintf(stderr, "Failed to write answer to fd: %s\n", CONNECT);
-      return 1;
+  // Verifica se a primeira parte da mensagem é o OP_CODE do connect
+  if (token == NULL || strcmp(token, "1") != 0) {
+    write_str(STDERR_FILENO, "Mensagem inválida\n");
+    return 1;
+  }
+
+  // Divisão da mensagem recebida em três partes, utilizando o delimitador '|'
+  char* token1 = strtok_r(NULL, "|", &saveptr);  // Token 1: o caminho do arquivo de pedidos do cliente
+  char* token2 = strtok_r(NULL, "|", &saveptr);  // Token 2: o caminho do arquivo de respostas do cliente
+  char* token3 = strtok_r(NULL, "|", &saveptr);  // Token 3: o caminho do arquivo de notificações do cliente
+
+  // Aloca memória para um novo cliente
+  Client* new_client = malloc(sizeof(Client));
+
+  // Abre os arquivos correspondentes aos descritores de arquivo de leitura e escrita para o novo cliente
+  new_client->client_resp_fd = open(token2, O_WRONLY);
+  new_client->client_notif_fd = open(token3, O_WRONLY);  
+  new_client->client_req_fd = open(token1, O_RDONLY);  
+
+  // Inicializa a lista de subscrições do cliente (inicialmente vazia)
+  new_client->subscriptions = NULL;
+
+  // Prepara uma resposta que será enviada ao cliente
+  char answer[MAX_WRITE_SIZE];
+  snprintf(answer, MAX_WRITE_SIZE, "%d|0", OP_CODE_CONNECT);  // Resposta de conexão com código de operação e status (0)
+
+  // Coloca o novo cliente na fila de produção (adiciona ao buffer compartilhado)
+  produce(new_client);
+
+  // Envia a resposta ao cliente via o descritor de arquivo de resposta
+  if (write(new_client->client_resp_fd, answer, strlen(answer)) == -1) {
+    fprintf(stderr, "Falha ao escrever resposta no fd: %s\n", CONNECT);
+    return 1;  // Retorna em caso de erro
+  }
+
+  // Procura uma posição vazia na lista de clientes (clients_list) e adiciona o novo cliente
+  for (int i = 0; i < MAX_SESSION_COUNT; i++) {
+    if (clients_list[i] == NULL) {
+      clients_list[i] = new_client;  // Adiciona o cliente na primeira posição vazia
+      break;
     }
-
-    for (int i = 0; i < MAX_SESSION_COUNT; i++) {
-      if(clients_list[i] == NULL) {
-        clients_list[i] = new_client;
-        break;
-      }
-    }
+  }
 
     for (int i = 0; i < MAX_SESSION_COUNT; i++) {
       if (clients_list[i] == NULL) {
-          printf("Client[%d]: NULL\n", i);
-          continue;
+        printf("Client[%d]: NULL\n", i);
+        continue;
       }
-      
+
       printf("Client[%d]:\n", i);
       printf("  Request FD: %d\n", clients_list[i]->client_req_fd);
       printf("  Response FD: %d\n", clients_list[i]->client_resp_fd);
       printf("  Notification FD: %d\n", clients_list[i]->client_notif_fd);
-      
+
       // Imprimir as subscrições
       printf("  Subscriptions: ");
-      KeySubNode *current = clients_list[i]->subscriptions;
+      KeySubNode* current = clients_list[i]->subscriptions;
       if (current == NULL) {
-          printf("None\n");
+        printf("None\n");
       } else {
-          printf("\n");
-          while (current != NULL) {
-              printf("    - Key: %s\n", current->key);
-              current = current->next;
-          }
+        printf("\n");
+        while (current != NULL) {
+          printf("    - Key: %s\n", current->key);
+          current = current->next;
+        }
       }
       printf("\n");
     }
-  
   }
 
   for (unsigned int i = 0; i < MAX_SESSION_COUNT; i++) {
@@ -787,18 +866,17 @@ static int dispatch_threads(DIR* dir) {
 }
 
 int main(int argc, char** argv) {
-
-  if (signal(SIGUSR1,sig_handle) == SIG_ERR) {
+  if (signal(SIGUSR1, sig_handle) == SIG_ERR) {
     perror("signal could not be resolved\n");
     exit(EXIT_FAILURE);
   }
-  
+
   if (argc < 5) {
     write_str(STDERR_FILENO, "Usage: ");
     write_str(STDERR_FILENO, argv[0]);
     write_str(STDERR_FILENO, " <jobs_dir>");
-		write_str(STDERR_FILENO, " <max_threads>");
-		write_str(STDERR_FILENO, " <max_backups>");
+    write_str(STDERR_FILENO, " <max_threads>");
+    write_str(STDERR_FILENO, " <max_backups>");
     write_str(STDERR_FILENO, " <fifo_register_name> \n");
     return 1;
   }
@@ -821,24 +899,24 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-	if (max_backups <= 0) {
-		write_str(STDERR_FILENO, "Invalid number of backups\n");
-		return 0;
-	}
+  if (max_backups <= 0) {
+    write_str(STDERR_FILENO, "Invalid number of backups\n");
+    return 0;
+  }
 
-	if (max_threads <= 0) {
-		write_str(STDERR_FILENO, "Invalid number of threads\n");
-		return 0;
-	}
+  if (max_threads <= 0) {
+    write_str(STDERR_FILENO, "Invalid number of threads\n");
+    return 0;
+  }
 
   if (kvs_init()) {
     write_str(STDERR_FILENO, "Failed to initialize KVS\n");
     return 1;
   }
+
   sem_init(&consumed, 0, 0);
   sem_init(&empty, 0, MAX_SESSION_COUNT);
   sem_init(&full, 0, 0);
-  // Loop 
 
   DIR* dir = opendir(argv[1]);
   if (dir == NULL) {
@@ -859,6 +937,6 @@ int main(int argc, char** argv) {
   }
 
   kvs_terminate();
-  
+
   return 0;
 }

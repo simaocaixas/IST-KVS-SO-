@@ -2,6 +2,7 @@
 #define KVS_OPERATIONS_H
 
 #include <stddef.h>
+
 #include "constants.h"
 
 /// Initializes the KVS state.
@@ -43,7 +44,7 @@ void kvs_show(int fd);
 /// Creates a backup of the KVS state and stores it in the correspondent
 /// backup file
 /// @return 0 if the backup was successful, 1 otherwise.
-int kvs_backup(size_t num_backup,char* job_filename , char* directory);
+int kvs_backup(size_t num_backup, char* job_filename, char* directory);
 
 /// Waits for the last backup to be called.
 void kvs_wait_backup();

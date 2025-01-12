@@ -2,6 +2,7 @@
 #define CLIENT_API_H
 
 #include <stddef.h>
+
 #include "src/common/constants.h"
 
 int* get_notify_fd();
@@ -28,5 +29,5 @@ int kvs_subscribe(const char* key);
 /// @return 0 if the key was unsubscribed successfully  (subscription existed and was removed), 1 otherwise.
 
 int kvs_unsubscribe(const char* key);
- 
+
 #endif  // CLIENT_API_H
