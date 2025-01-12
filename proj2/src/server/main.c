@@ -194,6 +194,23 @@ static int run_job(int in_fd, int out_fd, char* filename) {
         if (kvs_delete(num_pairs, keys, out_fd)) {
           write_str(STDERR_FILENO, "Failed to delete pair\n");
         }
+
+        for (size_t i = 0; i < num_pairs; i++) {
+            char* key = keys[i];
+            for (int j = 0; j < MAX_SESSION_COUNT; j++) {
+                if (clients_list[j] != NULL) {  // Verificar se o cliente existe
+                    KeySubNode* current = clients_list[j]->subscriptions;
+                    while (current != NULL) {
+                        if (strcmp(current->key, key) == 0) {  // Comparar strings em vez de ponteiros
+                            key_delete(&(clients_list[j]->subscriptions), key);
+                            break;
+                        }
+                        current = current->next;
+                    }
+                }
+            }
+        }
+
         break;
 
       case CMD_SHOW:

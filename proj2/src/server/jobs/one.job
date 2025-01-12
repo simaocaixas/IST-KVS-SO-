@@ -1,14 +1,17 @@
 WRITE [(a,anna)(b,bernardo)]
 WRITE [(d,dinis)(c,carlota)]
+
 WAIT 15000
 WRITE [(a,annasdsadsaze)]
 DELETE [a]
+
 WRITE [(d,Ladsadsa)]
 READ [x,z,l,v]
 SHOW
 BACKUP
 DELETE [c]
 READ [c]
-WAIT 1000
+WAIT 8000
+WRITE [(a,asiohfoiuahfiusahfbnas)]
 SHOW
 

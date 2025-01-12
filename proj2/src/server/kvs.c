@@ -116,6 +116,7 @@ int delete_pair(HashTable *ht, const char *key) {
             }
             // Free the memory allocated for the key and value
             notify_fds(keyNode->notifications, key, NULL, 1);
+            
             free(keyNode->key);
             free(keyNode->value);
             free(keyNode); // Free the key node itself
