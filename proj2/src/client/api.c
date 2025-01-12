@@ -70,6 +70,7 @@ int kvs_connect(char const* req_pipe_path, char const* resp_pipe_path, char cons
   
   char buffer_request[MAX_CONNECT_STRING];
   _server_fd = open(server_pipe_path, O_WRONLY);
+  
   if (_server_fd < 0) {
     fprintf(stderr, "Failed to open server FIFO\n");
     unlink(req_pipe_path); unlink(resp_pipe_path); unlink(notif_pipe_path);

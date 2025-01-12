@@ -18,9 +18,12 @@ void* manage_notifications(void *arguments) {
     char buffer[MAX_STRING_SIZE];
     ssize_t bytes_read = read(*notify_fd, buffer, MAX_STRING_SIZE);
         
-    if (bytes_read <= 0) {
-      printf("Conection lost!\n"); // REVER REVER REVER REVER REVER REVER REVER REVER REVER
-      exit(1); // Força encerramento do processo cliente
+    if (bytes_read < 0 && errno == EPIPE) {
+      printf("Conection lost! (Server received a SIGURS1)\n"); 
+      exit(1); 
+    } else if (bytes_read == 0) {
+      printf("Connection lost due to pipe closed or ...\n");
+      exit(1);
     }
         
     buffer[bytes_read] = '\0';
@@ -34,11 +37,7 @@ int main(int argc, char* argv[]) {
     fprintf(stderr, "Usage: %s <client_unique_id> <register_pipe_path>\n", argv[0]);
     return 1;
   }
-  /*
-    sem_t sem;
-    sem_init(&sem, 0, MAX_SESSION_COUNT);
-  */
-
+  
   char req_pipe_path[256] = "/tmp/req";
   char resp_pipe_path[256] = "/tmp/resp";
   char notif_pipe_path[256] = "/tmp/notif";

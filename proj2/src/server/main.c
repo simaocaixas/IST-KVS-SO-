@@ -21,13 +21,14 @@
 #include "kvs.h"
 #include "semaphore.h"
 
+int write_server_flag = 0;
 int sig_flag = 0;
 int read_index = 0;
 int write_index = 0;
 sem_t empty;
 sem_t full;
 pthread_mutex_t semExMut = PTHREAD_MUTEX_INITIALIZER;
-
+sem_t consumed;  // Declare no início do arquivo com os outros semáforos
 struct SharedData {
   DIR* dir;
   char* dir_name;
@@ -72,6 +73,14 @@ int key_insert(KeySubNode **head, const char* key) {
   }
 
   return 0;
+}
+
+void sig_handle() {
+  sig_flag = 1;
+  if (signal(SIGUSR1,sig_handle) == SIG_ERR) {
+    perror("signal could not be resolved\n");
+    exit(EXIT_FAILURE);
+  }
 }
 
 int key_delete(KeySubNode **head, const char* key) {
@@ -253,6 +262,7 @@ static void* get_file(void* arguments) {
   sigset_t set;
   sigemptyset(&set);
   sigaddset(&set, SIGUSR1);
+  sigaddset(&set, SIGPIPE);
   pthread_sigmask(SIG_BLOCK, &set, NULL);
 
   struct SharedData* thread_data = (struct SharedData*) arguments;
@@ -325,6 +335,10 @@ int client_sudden_disconnect(Client *client){
   int client_req_fd = client->client_req_fd; // we (server) will write to this
   int client_resp_fd = client->client_resp_fd; // we will read from this
   int client_notif_fd = client->client_notif_fd; 
+  
+  if (client_req_fd < 0 || client_resp_fd < 0 || client_notif_fd < 0) {
+    return 0;
+  }
 
   KeySubNode *current = client->subscriptions;
   KeySubNode *next;
@@ -341,34 +355,45 @@ int client_sudden_disconnect(Client *client){
     current = next;
   }
 
+  for (int i = 0; i < MAX_SESSION_COUNT; i++) {
+    if(clients_list[i] == client) {
+      clients_list[i] = NULL;
+      free(client);
+      break;
+    }
+  }
+
   close(client_req_fd); close(client_resp_fd); close(client_notif_fd);
 
   return 0;
 }
 
 static void* manage_clients(Client *temp_client) {
+ 
  printf("[Thread %ld] Iniciada\n", pthread_self());
  
  int client_req_fd = temp_client->client_req_fd;
  int client_resp_fd = temp_client->client_resp_fd;
  int client_notif_fd = temp_client->client_notif_fd; 
-
+  
  while (1) {
    printf("[Thread %ld] Aguardando comando...\n", pthread_self());
    char buffer[MAX_READ_SIZE];
    ssize_t bytes_read;
-   bytes_read = read(client_req_fd, buffer, MAX_READ_SIZE);
+   bytes_read = read(client_req_fd, buffer, MAX_READ_SIZE); 
    
-   if (sig_flag == 1) {
-    return 0;
+   if(bytes_read == -1 && errno == EPIPE) {
+      printf("DEU MERDA!!!!\n");
+      return 0;
    }
 
    if (bytes_read == 0) {
-     printf("[Thread %ld] Cliente desconectou abruptamente\n", pthread_self()); 
-     client_sudden_disconnect(temp_client);
-     return 0;
-   }
-
+      printf("[Thread %ld] Cliente desconectou abruptamente\n", pthread_self()); 
+      client_sudden_disconnect(temp_client);
+      return 0;
+    }
+   
+   
    if (bytes_read > 0) {
      printf("[Thread %ld] Recebido: %s\n", pthread_self(), buffer);
        
@@ -403,10 +428,23 @@ static void* manage_clients(Client *temp_client) {
          printf("[Thread %ld] Enviando resposta: %s\n", pthread_self(), answer);
 
          if(write(client_resp_fd, answer, strlen(answer)) == -1) {
+            if (errno == EPIPE) {
+              fprintf(stderr, "[Thread %ld] Houve um Kill, Epipe foi lancado\n", pthread_self());
+              return 0;
+            }
+
            fprintf(stderr, "[Thread %ld] Falha enviar resposta disconnect\n", pthread_self());
            return 0;
          }
-
+         
+         for (int i = 0; i < MAX_SESSION_COUNT; i++) {
+          if(clients_list[i] == temp_client) {
+            clients_list[i] = NULL;
+            free(temp_client);
+            break;
+          }
+         }
+         
          printf("[Thread %ld] Fechando conexão\n", pthread_self());
          close(client_req_fd); 
          close(client_resp_fd); 
@@ -432,6 +470,11 @@ static void* manage_clients(Client *temp_client) {
 
          printf("[Thread %ld] Enviando resposta: %s\n", pthread_self(), answer);
          if(write(client_resp_fd, answer, strlen(answer)) == -1) {
+            if (errno == EPIPE) {
+              fprintf(stderr, "[Thread %ld] Houve um Kill, Epipe foi lancado\n", pthread_self());
+              return 0;
+            }
+
            fprintf(stderr, "[Thread %ld] Falha enviar resposta subscribe\n", pthread_self());
            return 0;
          }
@@ -456,6 +499,11 @@ static void* manage_clients(Client *temp_client) {
 
          printf("[Thread %ld] Enviando resposta: %s\n", pthread_self(), answer);
          if(write(client_resp_fd, answer, strlen(answer)) == -1) {
+            if (errno == EPIPE) {
+              fprintf(stderr, "[Thread %ld] Houve um Kill, Epipe foi lancado\n", pthread_self());
+              return 0;
+          }
+
            fprintf(stderr, "[Thread %ld] Falha enviar resposta unsubscribe\n", pthread_self());
            return 0;
          }
@@ -470,6 +518,7 @@ static void* manage_clients(Client *temp_client) {
  return 0;
 }
 
+
 void consume() {
   sem_wait(&full);
   pthread_mutex_lock(&semExMut);
@@ -477,6 +526,7 @@ void consume() {
   read_index = (read_index + 1) % MAX_SESSION_COUNT;
   pthread_mutex_unlock(&semExMut);
   sem_post(&empty);
+  sem_post(&consumed);
   manage_clients(C);
 }
 
@@ -487,6 +537,7 @@ void produce(Client *c) {
   write_index = (write_index + 1) % MAX_SESSION_COUNT;
   pthread_mutex_unlock(&semExMut);
   sem_post(&full);
+  sem_wait(&consumed);
 }
 
 void* clients_loop() {
@@ -494,6 +545,7 @@ void* clients_loop() {
   sigset_t set;
   sigemptyset(&set);
   sigaddset(&set, SIGUSR1);
+  sigaddset(&set, SIGPIPE);
   pthread_sigmask(SIG_BLOCK, &set, NULL);
 
   while(1) {
@@ -550,20 +602,33 @@ static int dispatch_threads(DIR* dir) {
   // LER A MENSAGEM DE CONNECT
   while (1) {
     char buffer[MAX_READ_SIZE];
-    
+
     // Loop para mais clientes
     if(read(fifo_fd_read, buffer, MAX_READ_SIZE) == -1) { // 1|<PipeCliente(pedidos)>|<PipeCliente(respostas)>|<PipeCliente(notificacoes)>
-      write_str(STDERR_FILENO, "Failed to read from FIFO\n");
-      return 1;
+      if (errno == EINTR) {
+        if (sig_flag == 1) {
+          for (int i = 0; i < MAX_SESSION_COUNT; i++) {
+            if(clients_list[i] != NULL) {
+              client_sudden_disconnect(clients_list[i]);
+            }
+          }
+          sig_flag = 0;
+          continue;
+        }
+      } else {
+        write_str(STDERR_FILENO, "Error reading from FIFO\n");
+      }
     }
     
-    /*
-    if (sig_flag == 1) {
-      for (int i = 0; i < MAX_SESSION_COUNT; i++)
-    }
-    */
-    
-
+    if(write_server_flag == 0) {
+      int fifo_fd_write = open(server_pipe_path, O_WRONLY);
+      if(fifo_fd_write == -1) {
+        write_str(STDERR_FILENO, "Failed to open FIFO\n");
+        return 1;
+      }
+      write_server_flag = 1;
+    } 
+      
     char* saveptr = NULL;
     char* token = strtok_r(buffer, "|", &saveptr);
 
@@ -585,13 +650,45 @@ static int dispatch_threads(DIR* dir) {
     char answer[MAX_WRITE_SIZE];
     snprintf(answer, MAX_WRITE_SIZE, "%d|0", OP_CODE_CONNECT);
     
+    produce(new_client);
     if(write(new_client->client_resp_fd, answer, strlen(answer)) == -1) {
       fprintf(stderr, "Failed to write answer to fd: %s\n", CONNECT);
       return 1;
     }
 
-    clients_list[write_index] = new_client;
-    produce(new_client);    
+    for (int i = 0; i < MAX_SESSION_COUNT; i++) {
+      if(clients_list[i] == NULL) {
+        clients_list[i] = new_client;
+        break;
+      }
+    }
+
+    for (int i = 0; i < MAX_SESSION_COUNT; i++) {
+      if (clients_list[i] == NULL) {
+          printf("Client[%d]: NULL\n", i);
+          continue;
+      }
+      
+      printf("Client[%d]:\n", i);
+      printf("  Request FD: %d\n", clients_list[i]->client_req_fd);
+      printf("  Response FD: %d\n", clients_list[i]->client_resp_fd);
+      printf("  Notification FD: %d\n", clients_list[i]->client_notif_fd);
+      
+      // Imprimir as subscrições
+      printf("  Subscriptions: ");
+      KeySubNode *current = clients_list[i]->subscriptions;
+      if (current == NULL) {
+          printf("None\n");
+      } else {
+          printf("\n");
+          while (current != NULL) {
+              printf("    - Key: %s\n", current->key);
+              current = current->next;
+          }
+      }
+      printf("\n");
+    }
+  
   }
 
   for (unsigned int i = 0; i < MAX_SESSION_COUNT; i++) {
@@ -618,11 +715,8 @@ static int dispatch_threads(DIR* dir) {
   return 0;
 }
 
-void sig_handle() {
-  sig_flag = 1;
-}
-
 int main(int argc, char** argv) {
+
   if (signal(SIGUSR1,sig_handle) == SIG_ERR) {
     perror("signal could not be resolved\n");
     exit(EXIT_FAILURE);
@@ -670,7 +764,7 @@ int main(int argc, char** argv) {
     write_str(STDERR_FILENO, "Failed to initialize KVS\n");
     return 1;
   }
-
+  sem_init(&consumed, 0, 0);
   sem_init(&empty, 0, MAX_SESSION_COUNT);
   sem_init(&full, 0, 0);
   // Loop 
@@ -697,14 +791,3 @@ int main(int argc, char** argv) {
   
   return 0;
 }
-
-
-
-
-/*
-ex 2
-
-->
-
-
-*/

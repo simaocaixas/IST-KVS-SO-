@@ -1,8 +1,9 @@
 WRITE [(a,anna)(b,bernardo)]
 WRITE [(d,dinis)(c,carlota)]
-WAIT 10000
+WAIT 15000
 WRITE [(a,annasdsadsaze)]
 DELETE [a]
+WRITE [(d,Ladsadsa)]
 READ [x,z,l,v]
 SHOW
 BACKUP
