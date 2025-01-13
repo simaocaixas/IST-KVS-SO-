@@ -273,7 +273,7 @@ int kvs_connect(char const* req_pipe_path, char const* resp_pipe_path, char cons
  */
 int kvs_disconnect(void) {
   // Envia uma mensagem de desconexão para o FIFO de pedidos
-  write(_req_fd, "2", 3);
+  write(_req_fd, "2", 2);
   char buffer_response[MAX_CONNECT_STRING], charOPCODE = '0' + OP_CODE_DISCONNECT;
 
   // Lê a resposta do servidor (a leitura é atómica, pois lê menos de 4096 bytes)
