@@ -22,32 +22,31 @@
 #include "src/server/constants.h"
 
 int write_server_flag = 0;  // Flag de controlo para indicar se o servidor está pronto para escrever
-int sig_flag = 0;  // Flag para o sinal SIGUSR1
-int read_index = 0;  // Índice de leitura no buffer
-int write_index = 0;  // Índice de escrita no buffer
-sem_t empty;  // Semáforo para indicar espaços vazios no buffer
-sem_t full;  // Semáforo para indicar espaços preenchidos no buffer
+int sig_flag = 0;           // Flag para o sinal SIGUSR1
+int read_index = 0;         // Índice de leitura no buffer
+int write_index = 0;        // Índice de escrita no buffer
+sem_t empty;                // Semáforo para indicar espaços vazios no buffer
+sem_t full;                 // Semáforo para indicar espaços preenchidos no buffer
 pthread_mutex_t semExMut = PTHREAD_MUTEX_INITIALIZER;  // Mutex para exclusão mútua no controlo de semáforos
-sem_t consumed;  // Semáforo para indicar que os dados foram consumidos
-
+sem_t consumed;                                        // Semáforo para indicar que os dados foram consumidos
 
 struct SharedData {
-  DIR* dir;  
-  char* dir_name;  
+  DIR* dir;
+  char* dir_name;
   pthread_mutex_t directory_mutex;
 };
 
 // Estrutura para representar um cliente
 typedef struct Client {
   int client_req_fd;
-  int client_resp_fd;  
-  int client_notif_fd;  
+  int client_resp_fd;
+  int client_notif_fd;
   KeySubNode* subscriptions;
 } Client;
 
 // Buffers para armazenar os clientes
 Client* client_server_buffer[MAX_SESSION_COUNT];  // Buffer de clientes a serem servidos
-Client* clients_list[MAX_SESSION_COUNT];  // Lista de clientes conectados
+Client* clients_list[MAX_SESSION_COUNT];          // Lista de clientes conectados
 
 // Função para inserir uma chave na lista de subscrições
 int key_insert(KeySubNode** head, const char* key) {
@@ -69,7 +68,7 @@ int key_insert(KeySubNode** head, const char* key) {
     *head = new_node;  // Se a lista estiver vazia, o novo nó será o primeiro
   } else {
     new_node->next = *head;  // Inserção a esquerda na lista
-    *head = new_node;  // O novo nó é agora o primeiro da lista
+    *head = new_node;        // O novo nó é agora o primeiro da lista
   }
 
   return 0;
@@ -77,7 +76,7 @@ int key_insert(KeySubNode** head, const char* key) {
 
 // Função para tratar sinais (SIGUSR1)
 void sig_handle() {
-  sig_flag = 1;  // Altera a flag de sinal
+  sig_flag = 1;                                  // Altera a flag de sinal
   if (signal(SIGUSR1, sig_handle) == SIG_ERR) {  // Volta a registar o manipulador do sinal
     perror("signal could not be resolved\n");
     exit(EXIT_FAILURE);
@@ -201,12 +200,14 @@ static int run_job(int in_fd, int out_fd, char* filename) {
           // Iterar sobre todos os clientes na lista
           for (int j = 0; j < MAX_SESSION_COUNT; j++) {
             if (clients_list[j] != NULL) {  // Verificar se o cliente existe
-              KeySubNode* current = clients_list[j]->subscriptions;  // Iniciar a iteração sobre as subscrições do cliente
+              KeySubNode* current =
+                  clients_list[j]->subscriptions;  // Iniciar a iteração sobre as subscrições do cliente
               // Iterar sobre as subscrições do cliente
               while (current != NULL) {
                 if (strcmp(current->key, key) == 0) {  // Comparar as strings das chaves (não os ponteiros)
-                  key_delete(&(clients_list[j]->subscriptions), key);  // Eliminar a chave da lista de subscrições do cliente
-                  break;  // Sair do loop após a remoção da chave
+                  key_delete(&(clients_list[j]->subscriptions),
+                             key);  // Eliminar a chave da lista de subscrições do cliente
+                  break;            // Sair do loop após a remoção da chave
                 }
                 current = current->next;  // Passar para a próxima subscrição
               }
@@ -277,18 +278,16 @@ static int run_job(int in_fd, int out_fd, char* filename) {
 
 // frees arguments
 static void* get_file(void* arguments) {
-  
   // Definir um conjunto de sinais a ser bloqueado
   sigset_t set;
-  sigemptyset(&set);  // Inicializa o conjunto de sinais com nenhum sinal
+  sigemptyset(&set);         // Inicializa o conjunto de sinais com nenhum sinal
   sigaddset(&set, SIGUSR1);  // Adiciona SIGUSR1 ao conjunto de sinais
-  sigaddset(&set, SIGPIPE);   // Adiciona SIGPIPE ao conjunto de sinais
+  sigaddset(&set, SIGPIPE);  // Adiciona SIGPIPE ao conjunto de sinais
 
   // Bloquear os sinais definidos no conjunto
   pthread_sigmask(SIG_BLOCK, &set, NULL);  // Bloqueia os sinais especificados no conjunto 'set' para a thread atual
 
-
-  struct SharedData* thread_data = (struct SharedData*)arguments;  //codigo do esqueleto (não comentado)
+  struct SharedData* thread_data = (struct SharedData*)arguments;  // codigo do esqueleto (não comentado)
   DIR* dir = thread_data->dir;
   char* dir_name = thread_data->dir_name;
 
@@ -355,7 +354,7 @@ static void* get_file(void* arguments) {
 
 // Função para lidar com desconexão súbita de um cliente
 int client_sudden_disconnect(Client* client) {
-  int client_req_fd = client->client_req_fd;    
+  int client_req_fd = client->client_req_fd;
   int client_resp_fd = client->client_resp_fd;
   int client_notif_fd = client->client_notif_fd;
 
@@ -388,7 +387,7 @@ int client_sudden_disconnect(Client* client) {
   for (int i = 0; i < MAX_SESSION_COUNT; i++) {
     if (clients_list[i] == client) {
       clients_list[i] = NULL;  // Definir a posição do cliente como NULL
-      free(client);  // Libertar a memória associada ao cliente
+      free(client);            // Libertar a memória associada ao cliente
       break;
     }
   }
@@ -402,14 +401,12 @@ int client_sudden_disconnect(Client* client) {
 }
 
 static void* manage_clients(Client* temp_client) {
-
   // Obtemos os descritores de ficheiro do cliente
   int client_req_fd = temp_client->client_req_fd;
   int client_resp_fd = temp_client->client_resp_fd;
   int client_notif_fd = temp_client->client_notif_fd;
 
   while (1) {
-  
     char buffer[MAX_READ_SIZE];
     ssize_t bytes_read;
 
@@ -424,7 +421,6 @@ static void* manage_clients(Client* temp_client) {
 
     // Se foram lidos dados do cliente
     if (bytes_read > 0) {
-
       int res, cleanup_success;
       char *saveptr = NULL, answer[MAX_WRITE_SIZE];
       char* token = strtok_r(buffer, "|", &saveptr);
@@ -503,7 +499,6 @@ static void* manage_clients(Client* temp_client) {
             fprintf(stderr, "Falha enviar resposta subscribe\n");
             return 0;
           }
-        
 
           break;
 
@@ -569,7 +564,7 @@ void consume() {
   if (sem_post(&empty) != 0) {
     perror("sem_post(&empty) failed");
   }
-  
+
   // Indica que o item foi consumido
   if (sem_post(&consumed) != 0) {
     perror("sem_post(&consumed) failed");
@@ -616,7 +611,7 @@ void* clients_loop() {
   sigset_t set;
   sigemptyset(&set);
   sigaddset(&set, SIGUSR1);  // Bloqueia SIGUSR1
-  sigaddset(&set, SIGPIPE);   // Bloqueia SIGPIPE
+  sigaddset(&set, SIGPIPE);  // Bloqueia SIGPIPE
 
   // Bloqueia os sinais SIGUSR1 e SIGPIPE na thread atual
   pthread_sigmask(SIG_BLOCK, &set, NULL);
@@ -628,7 +623,6 @@ void* clients_loop() {
 }
 
 static int dispatch_threads(DIR* dir) {
-  
   pthread_t* threads = malloc(max_threads * sizeof(pthread_t));
 
   if (threads == NULL) {
@@ -637,7 +631,7 @@ static int dispatch_threads(DIR* dir) {
   }
 
   struct SharedData thread_data = {dir, jobs_directory, PTHREAD_MUTEX_INITIALIZER};
-  
+
   for (size_t i = 0; i < max_threads; i++) {
     if (pthread_create(&threads[i], NULL, get_file, (void*)&thread_data) != 0) {
       fprintf(stderr, "Falha ao criar thread %zu\n", i);
@@ -702,72 +696,73 @@ static int dispatch_threads(DIR* dir) {
       }
     }
 
-  // Verifica se o servidor já foi configurado para escrita no FIFO
-  if (write_server_flag == 0) {
-    // Tenta abrir o FIFO para escrita
-    int fifo_fd_write = open(server_pipe_path, O_WRONLY);
-    if (fifo_fd_write == -1) {
-      write_str(STDERR_FILENO, "Falha ao abrir FIFO\n");
+    // Verifica se o servidor já foi configurado para escrita no FIFO
+    if (write_server_flag == 0) {
+      // Tenta abrir o FIFO para escrita
+      int fifo_fd_write = open(server_pipe_path, O_WRONLY);
+      if (fifo_fd_write == -1) {
+        write_str(STDERR_FILENO, "Falha ao abrir FIFO\n");
+        return 1;
+      }
+      // Marca que o servidor está aberto para escrever no FIFO
+      write_server_flag = 1;
+    }
+
+    // Processamento da mensagem recebida no buffer
+    char* saveptr = NULL;
+    char* token = strtok_r(buffer, "|", &saveptr);
+
+    // Verifica se a primeira parte da mensagem é o OP_CODE do connect
+    if (token == NULL || strcmp(token, "1") != 0) {
+      write_str(STDERR_FILENO, "Mensagem inválida\n");
       return 1;
     }
-    // Marca que o servidor está aberto para escrever no FIFO
-    write_server_flag = 1;
-  }
 
-  // Processamento da mensagem recebida no buffer
-  char* saveptr = NULL;
-  char* token = strtok_r(buffer, "|", &saveptr);
+    // Divisão da mensagem recebida em três partes, utilizando o delimitador '|'
+    char* token1 = strtok_r(NULL, "|", &saveptr);  // Token 1: o caminho do arquivo de pedidos do cliente
+    char* token2 = strtok_r(NULL, "|", &saveptr);  // Token 2: o caminho do arquivo de respostas do cliente
+    char* token3 = strtok_r(NULL, "|", &saveptr);  // Token 3: o caminho do arquivo de notificações do cliente
 
-  // Verifica se a primeira parte da mensagem é o OP_CODE do connect
-  if (token == NULL || strcmp(token, "1") != 0) {
-    write_str(STDERR_FILENO, "Mensagem inválida\n");
-    return 1;
-  }
+    char full_req_path[MAX_PIPE_PATH_LENGTH];
+    char full_resp_path[MAX_PIPE_PATH_LENGTH];
+    char full_notif_path[MAX_PIPE_PATH_LENGTH];
 
-  // Divisão da mensagem recebida em três partes, utilizando o delimitador '|'
-  char* token1 = strtok_r(NULL, "|", &saveptr);  // Token 1: o caminho do arquivo de pedidos do cliente
-  char* token2 = strtok_r(NULL, "|", &saveptr);  // Token 2: o caminho do arquivo de respostas do cliente
-  char* token3 = strtok_r(NULL, "|", &saveptr);  // Token 3: o caminho do arquivo de notificações do cliente
+    snprintf(full_req_path, MAX_PIPE_PATH_LENGTH, "/tmp/%s", token1);
+    snprintf(full_resp_path, MAX_PIPE_PATH_LENGTH, "/tmp/%s", token2);
+    snprintf(full_notif_path, MAX_PIPE_PATH_LENGTH, "/tmp/%s", token3);
 
-  char full_req_path[MAX_PIPE_PATH_LENGTH];
-  char full_resp_path[MAX_PIPE_PATH_LENGTH];
-  char full_notif_path[MAX_PIPE_PATH_LENGTH];
+    // Aloca memória para um novo cliente
+    Client* new_client = malloc(sizeof(Client));
 
-  snprintf(full_req_path, MAX_PIPE_PATH_LENGTH, "/tmp/%s", token1);
-  snprintf(full_resp_path, MAX_PIPE_PATH_LENGTH, "/tmp/%s", token2);
-  snprintf(full_notif_path, MAX_PIPE_PATH_LENGTH, "/tmp/%s", token3);
+    // Abre os arquivos correspondentes aos descritores de arquivo de leitura e escrita para o novo cliente
+    new_client->client_resp_fd = open(full_resp_path, O_WRONLY);
+    new_client->client_notif_fd = open(full_notif_path, O_WRONLY);
+    new_client->client_req_fd = open(full_req_path, O_RDONLY);
 
-  // Aloca memória para um novo cliente
-  Client* new_client = malloc(sizeof(Client));
+    // Inicializa a lista de subscrições do cliente (inicialmente vazia)
+    new_client->subscriptions = NULL;
 
-  // Abre os arquivos correspondentes aos descritores de arquivo de leitura e escrita para o novo cliente
-  new_client->client_resp_fd = open(full_resp_path, O_WRONLY);
-  new_client->client_notif_fd = open(full_notif_path, O_WRONLY);  
-  new_client->client_req_fd = open(full_req_path, O_RDONLY);
+    // Prepara uma resposta que será enviada ao cliente
+    char answer[MAX_WRITE_SIZE];
+    snprintf(answer, MAX_WRITE_SIZE, "%d|0",
+             OP_CODE_CONNECT);  // Resposta de conexão com código de operação e status (0)
 
-  // Inicializa a lista de subscrições do cliente (inicialmente vazia)
-  new_client->subscriptions = NULL;
+    // Coloca o novo cliente na fila de produção (adiciona ao buffer compartilhado)
+    produce(new_client);
 
-  // Prepara uma resposta que será enviada ao cliente
-  char answer[MAX_WRITE_SIZE];
-  snprintf(answer, MAX_WRITE_SIZE, "%d|0", OP_CODE_CONNECT);  // Resposta de conexão com código de operação e status (0)
-
-  // Coloca o novo cliente na fila de produção (adiciona ao buffer compartilhado)
-  produce(new_client);
-
-  // Envia a resposta ao cliente via o descritor de arquivo de resposta
-  if (write(new_client->client_resp_fd, answer, strlen(answer)) == -1) {
-    fprintf(stderr, "Falha ao escrever resposta no fd: %s\n", CONNECT);
-    return 1;  // Retorna em caso de erro
-  }
-
-  // Procura uma posição vazia na lista de clientes (clients_list) e adiciona o novo cliente
-  for (int i = 0; i < MAX_SESSION_COUNT; i++) {
-    if (clients_list[i] == NULL) {
-      clients_list[i] = new_client;  // Adiciona o cliente na primeira posição vazia
-      break;
+    // Envia a resposta ao cliente via o descritor de arquivo de resposta
+    if (write(new_client->client_resp_fd, answer, strlen(answer)) == -1) {
+      fprintf(stderr, "Falha ao escrever resposta no fd: %s\n", CONNECT);
+      return 1;  // Retorna em caso de erro
     }
-  }
+
+    // Procura uma posição vazia na lista de clientes (clients_list) e adiciona o novo cliente
+    for (int i = 0; i < MAX_SESSION_COUNT; i++) {
+      if (clients_list[i] == NULL) {
+        clients_list[i] = new_client;  // Adiciona o cliente na primeira posição vazia
+        break;
+      }
+    }
   }
 
   for (unsigned int i = 0; i < MAX_SESSION_COUNT; i++) {

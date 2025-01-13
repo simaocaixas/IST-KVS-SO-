@@ -126,15 +126,15 @@ int kvs_unsubscription(const char* key, int notif_fd) {
       // Procura pelo 'notif_fd' na lista de notificações e remove-o.
       for (int i = 0; i < MAX_SESSION_COUNT; i++) {
         if (keyNode->notifications[i] == notif_fd) {
-          keyNode->notifications[i] = -3; // Marca o slot como disponível.
-          return 0; // Sucesso na remoção da inscrição.
+          keyNode->notifications[i] = -3;  // Marca o slot como disponível.
+          return 0;                        // Sucesso na remoção da inscrição.
         }
       }
     }
     previousNode = keyNode;
     keyNode = previousNode->next;  // Move para o próximo nó na lista.
   }
-  return 1; // Retorna erro se a chave ou o 'notif_fd' não forem encontrados.
+  return 1;  // Retorna erro se a chave ou o 'notif_fd' não forem encontrados.
 }
 
 int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE], int fd) {

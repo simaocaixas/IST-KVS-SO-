@@ -36,7 +36,7 @@ int notify_fds(int notifications[MAX_SESSION_COUNT], const char *key, const char
 
   // Cria a mensagem a ser enviada com base no valor de 'bit'.
   if (bit == 0) {
-     // Caso 'bit' seja 0, indica que a chave foi alterada.
+    // Caso 'bit' seja 0, indica que a chave foi alterada.
     snprintf(buffer, MAX_STRING_SIZE, "(%s,%s)", key, value);
   } else {
     // Caso 'bit' seja diferente de 0, indica que a chave foi eliminada.
@@ -49,7 +49,7 @@ int notify_fds(int notifications[MAX_SESSION_COUNT], const char *key, const char
     if (notifications[i] > 0) {
       // Escreve a mensagem no descritor e verifica erros.
       if (write(notifications[i], buffer, MAX_STRING_SIZE) == -1) {
-        return 1; // Retorna erro se a escrita falhar.
+        return 1;  // Retorna erro se a escrita falhar.
       }
     }
   }
@@ -126,7 +126,7 @@ int delete_pair(HashTable *ht, const char *key) {
         // Node to delete is not the first; bypass it
         prevNode->next = keyNode->next;  // Link the previous node to the next node
       }
-      
+
       // Notifies every descriptor of every client subscribed to the key
       notify_fds(keyNode->notifications, key, NULL, 1);
 

@@ -18,7 +18,6 @@
  * @return NULL após a conclusão (não utilizado)
  */
 void* manage_notifications(void* arguments) {
-
   if (arguments == NULL) {
     fprintf(stderr, "Error: NULL argument received\n");
     exit(1);
@@ -29,47 +28,47 @@ void* manage_notifications(void* arguments) {
     fprintf(stderr, "Error: Invalid file descriptor\n");
     exit(1);
   }
-  
+
   // Ciclo infinito para continuar a receber notificações
   while (1) {
     char buffer[MAX_STRING_SIZE];
     ssize_t bytes_read = read(*notify_fd, buffer, MAX_STRING_SIZE);
 
-  if (bytes_read < 0) {
-        // EINTR: Chamada foi interrompida por um sinal
-        if (errno == EINTR) {
-          continue;  
-        }
-        // EAGAIN Não há dados disponíveis
-        else if (errno == EAGAIN) {
-          continue;  // Tenta ler novamente
-        }
-        // EPIPE: Pipe foi fechado do outro lado
-        else if (errno == EPIPE) {
-          printf("Connection lost! (Server received a SIGURS1)\n");
-          exit(1);
-        }
-        // EBADF: File descriptor inválido
-        else if (errno == EBADF) {
-          printf("Error: Invalid notification pipe descriptor!\n");
-          exit(1);
-        }
-        // EIO: Erro de I/O no sistema de ficheiros
-        else if (errno == EIO) {
-          printf("Error: I/O error on notification pipe!\n");
-          exit(1);
-        }
-        // Outros erros não especificados
-        else {
-          printf("Error reading from notification pipe: %s\n", strerror(errno));
-          exit(1);
-        }
-      } 
-      // EOF - pipe foi fechado normalmente
-      else if (bytes_read == 0) {
-        printf("Connection lost!\n");
+    if (bytes_read < 0) {
+      // EINTR: Chamada foi interrompida por um sinal
+      if (errno == EINTR) {
+        continue;
+      }
+      // EAGAIN Não há dados disponíveis
+      else if (errno == EAGAIN) {
+        continue;  // Tenta ler novamente
+      }
+      // EPIPE: Pipe foi fechado do outro lado
+      else if (errno == EPIPE) {
+        printf("Connection lost! (Server received a SIGURS1)\n");
         exit(1);
       }
+      // EBADF: File descriptor inválido
+      else if (errno == EBADF) {
+        printf("Error: Invalid notification pipe descriptor!\n");
+        exit(1);
+      }
+      // EIO: Erro de I/O no sistema de ficheiros
+      else if (errno == EIO) {
+        printf("Error: I/O error on notification pipe!\n");
+        exit(1);
+      }
+      // Outros erros não especificados
+      else {
+        printf("Error reading from notification pipe: %s\n", strerror(errno));
+        exit(1);
+      }
+    }
+    // EOF - pipe foi fechado normalmente
+    else if (bytes_read == 0) {
+      printf("Connection lost!\n");
+      exit(1);
+    }
 
     // Adiciona terminador da string e imprime
     buffer[bytes_read] = '\0';
@@ -81,7 +80,7 @@ void* manage_notifications(void* arguments) {
 
 /**
  * Função principal do programa - Gere a inicialização do cliente e processamento de comandos
- * 
+ *
  * @param argc - Número de argumentos da linha de comandos
  * @param argv - Array de strings com os argumentos da linha de comandos
  * @return 0 em caso de sucesso, 1 em caso de erro
@@ -94,7 +93,7 @@ int main(int argc, char* argv[]) {
   }
 
   /*
-  Para garantir a unicidade dos fifos no cluster em que será 
+  Para garantir a unicidade dos fifos no cluster em que será
   avaliado o projeto adicionamos o nosso numero de grupo.
   */
   char req_pipe_path[256] = "/tmp/req033";
@@ -127,13 +126,14 @@ int main(int argc, char* argv[]) {
   while (1) {
     switch (get_next(STDIN_FILENO)) {
       case CMD_DISCONNECT:
-      
+
         if (kvs_disconnect() != 0) {
           fprintf(stderr, "Failed to disconnect to the server\n");
           return 1;
         }
-    
-        // Aguarda a finalização da thread de notificações, dessa forma garantimos que terminamos o programa sem thread zombie
+
+        // Aguarda a finalização da thread de notificações, dessa forma garantimos que terminamos o programa sem thread
+        // zombie
         pthread_join(thread_notify_me, NULL);
         return 0;
 
@@ -164,7 +164,7 @@ int main(int argc, char* argv[]) {
         break;
 
       case CMD_DELAY:
-        // Feita completamente no esquelo inicial fornecido 
+        // Feita completamente no esquelo inicial fornecido
         if (parse_delay(STDIN_FILENO, &delay_ms) == -1) {
           fprintf(stderr, "Invalid command. See HELP for usage\n");
           continue;
