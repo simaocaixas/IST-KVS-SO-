@@ -1,15 +1,18 @@
-WRITE [(a,anna)(b,bernardo)]
-WRITE [(d,dinis)(c,carlota)]
-WAIT 15000
-WRITE [(a,annasdsadsaze)]
-DELETE [a]
-WRITE [(d,Ladsadsa)]
-READ [x,z,l,v]
-SHOW
-BACKUP
-DELETE [c]
-READ [c]
-WAIT 8000
-WRITE [(a,asiohfoiuahfiusahfbnas)]
-SHOW
+WRITE [(a,cas)]
+WRITE [(b,ac)]
+WAIT 10000
+WRITE [(b,asdasd)]
+WRITE [(a,aposjfpoasjfpoahfpahfpo)]
+WRITE [(b,askjlbnokljasbndvlksdvn)]
+WRITE [(c,askjlbnokljasbndvlksdvn)]
+WRITE [(d,askjlbnokljasbndvlksdvn)]
+WRITE [(e,askjlbnokljasbndvlksdvn)]
+WRITE [(f,askjlbnokljasbndvlksdvn)]
+WRITE [(g,askjlbnokljasbndvlksdvn)]
+WAIT 10000
+WRITE [(b,asdasd)]
+DELETE [b]
+DELETE [b]
 
+
+    

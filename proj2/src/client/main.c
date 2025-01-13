@@ -18,25 +18,64 @@
  * @return NULL após a conclusão (não utilizado)
  */
 void* manage_notifications(void* arguments) {
-  int* notify_fd = (int*)arguments;
 
+  if (arguments == NULL) {
+    fprintf(stderr, "Error: NULL argument received\n");
+    exit(1);
+  }
+
+  int* notify_fd = (int*)arguments;
+  if (*notify_fd < 0) {
+    fprintf(stderr, "Error: Invalid file descriptor\n");
+    exit(1);
+  }
+  
   // Ciclo infinito para continuar a receber notificações
   while (1) {
     char buffer[MAX_STRING_SIZE];
     ssize_t bytes_read = read(*notify_fd, buffer, MAX_STRING_SIZE);
 
-    // Verifica se a ligação foi perdida devido ao SIGURS1, se receber apenas 0 bytes termina tambem.
-    if (bytes_read < 0 && errno == EPIPE) {
-      printf("Conection lost! (Server received a SIGURS1)\n");
-      exit(1);
-    } else if (bytes_read == 0) {
-      printf("Connection lost due to pipe closed!\n");
-      exit(1);
-    }
-    // Necessario + '\0' para impressão
+  if (bytes_read < 0) {
+        // EINTR: Chamada foi interrompida por um sinal
+        if (errno == EINTR) {
+          continue;  
+        }
+        // EAGAIN Não há dados disponíveis
+        else if (errno == EAGAIN) {
+          continue;  // Tenta ler novamente
+        }
+        // EPIPE: Pipe foi fechado do outro lado
+        else if (errno == EPIPE) {
+          printf("Connection lost! (Server received a SIGURS1)\n");
+          exit(1);
+        }
+        // EBADF: File descriptor inválido
+        else if (errno == EBADF) {
+          printf("Error: Invalid notification pipe descriptor!\n");
+          exit(1);
+        }
+        // EIO: Erro de I/O no sistema de ficheiros
+        else if (errno == EIO) {
+          printf("Error: I/O error on notification pipe!\n");
+          exit(1);
+        }
+        // Outros erros não especificados
+        else {
+          printf("Error reading from notification pipe: %s\n", strerror(errno));
+          exit(1);
+        }
+      } 
+      // EOF - pipe foi fechado normalmente
+      else if (bytes_read == 0) {
+        printf("Connection lost!\n");
+        exit(1);
+      }
+
+    // Adiciona terminador da string e imprime
     buffer[bytes_read] = '\0';
     printf("%s\n", buffer);
   }
+
   return NULL;
 }
 
